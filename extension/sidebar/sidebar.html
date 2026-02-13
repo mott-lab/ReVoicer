@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Converser</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div id="app">
+    <header class="sidebar-header">
+      <h1>PDF Converser</h1>
+      <div id="pdf-title" class="pdf-title">No PDF detected</div>
+    </header>
+
+    <div class="toolbar">
+      <select id="view-mode">
+        <option value="chronological">By Page Order</option>
+        <option value="by-type">By Type</option>
+        <option value="by-section">By Section</option>
+        <option value="by-theme">By Theme</option>
+      </select>
+      <button id="export-btn" class="toolbar-btn" title="Export as Markdown">Export MD</button>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+      <div class="spinner"></div>
+      <span>Loading...</span>
+    </div>
+
+    <div id="notes-container">
+      <p class="empty-state">No annotations yet. Highlight text in a PDF and click the microphone button to begin.</p>
+    </div>
+  </div>
+  <script src="../lib/api-client.js"></script>
+  <script src="sidebar.js"></script>
+</body>
+</html>

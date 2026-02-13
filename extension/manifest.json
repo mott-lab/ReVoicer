@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "PDF Converser",
+  "version": "0.1.0",
+  "description": "Annotate PDFs with voice notes, cleaned up by AI",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "sidePanel",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "file:///*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "lib/pdf-identifier.js",
+        "lib/speech.js",
+        "lib/api-client.js",
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "viewer/viewer.html",
+        "viewer/viewer.js",
+        "viewer/viewer.css",
+        "viewer/pdfjs/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
