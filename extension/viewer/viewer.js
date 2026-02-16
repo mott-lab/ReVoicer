@@ -15,9 +15,33 @@ const SCALE_STEP = 0.25;
 const params = new URLSearchParams(window.location.search);
 const pdfUrl = params.get('file');
 
+// Compute SHA-256 content hash from the first 64KB of the PDF for stable identification.
+// This hash survives renames and moves — same content always produces the same identifier.
+async function computeContentHash(url) {
+  try {
+    const resp = await fetch(url, { headers: { 'Range': 'bytes=0-65535' } });
+    const buffer = await resp.arrayBuffer();
+    // If server ignores Range header, slice to first 64KB for consistent hashing
+    const hashBytes = buffer.byteLength > 65536 ? buffer.slice(0, 65536) : buffer;
+    const digest = await crypto.subtle.digest('SHA-256', hashBytes);
+    const hashArray = Array.from(new Uint8Array(digest));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (err) {
+    console.error('PDF Converser: Failed to compute content hash:', err);
+    return null;
+  }
+}
+
 if (!pdfUrl) {
   document.getElementById('pages').innerHTML = '<div id="loading-msg">No PDF file specified.</div>';
 } else {
+  // Compute content hash before loading, so it's available when the user interacts
+  computeContentHash(pdfUrl).then(hash => {
+    window.__pdfContentHash = hash;
+    if (hash) {
+      console.log('PDF Converser: content hash computed:', hash.substring(0, 12) + '...');
+    }
+  });
   document.getElementById('pdf-title').textContent = decodeURIComponent(pdfUrl.split('/').pop().split('?')[0]);
   loadPdf(pdfUrl);
 }

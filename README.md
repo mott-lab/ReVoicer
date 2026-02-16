@@ -51,7 +51,7 @@ The backend runs at `http://localhost:8000`. You can verify it's working at `htt
 OPENAI_API_KEY=sk-your-key-here    # Required for LLM cleanup and Whisper
 OPENAI_MODEL=gpt-4o-mini           # Model for cleaning up annotations
 LLM_PROVIDER=openai                # "openai" or "ollama"
-DATABASE_URL=sqlite+aiosqlite:///./pdf_converser.db
+NOTES_DIR=./notes                  # Where annotation JSON files are stored
 
 # Optional: use Ollama instead
 # LLM_PROVIDER=ollama
@@ -110,26 +110,30 @@ extension/              Chrome Extension (Manifest V3)
 backend/                Python FastAPI
   app/
     routers/            API endpoints (notes CRUD, transcribe, organize, export)
-    services/           Business logic (LLM cleanup, organization, export)
+    services/           Business logic (LLM cleanup, note storage, organization, export)
     prompts/            LangChain prompt templates
-    models.py           SQLAlchemy ORM (Note model)
     config.py           Settings via Pydantic + .env
+  notes/                JSON note files (one per PDF, named by content hash)
 ```
+
+## Note Storage
+
+Annotations are stored as JSON files in the `notes/` directory (configurable via `NOTES_DIR`). Each PDF gets one file, named by the SHA-256 hash of the first 64KB of the PDF's content:
+
+```
+notes/
+  a1b2c3d4e5f6...json    # One file per PDF
+```
+
+This content-hash approach means:
+- **Rename-proof**: Moving or renaming a PDF doesn't lose its notes — same content always produces the same hash
+- **Human-readable**: Notes are plain JSON, easy to inspect or version-control
+- **O(1) lookup**: No index or database needed — the hash maps directly to the filename
+- Each file also stores the PDF title and URL as metadata for display purposes
 
 ## Future Ideas
 
 These are not currently implemented but are tracked here for future development.
-
-### File-Based Note Persistence
-Save annotations to JSON files instead of (or in addition to) the SQLite database. Proposed design:
-
-- **Content-hash naming**: Store note files as `notes/{sha256_of_pdf_content}.json`, where the hash is computed from the first ~64KB of the PDF's bytes. This survives renames and moves — the content doesn't change, so the hash stays the same. Reading 64KB on file open is negligible. O(1) lookup, no separate index needed.
-- **PDF reference as metadata**: Each note file also stores the last-known PDF filename/path as a field for display purposes and as a fallback if the content-hash approach ever needs debugging.
-- **Edge cases**: The only case this breaks is if the PDF content itself changes (re-download, different version), which is rare for academic papers and arguably represents a different document anyway.
-- **Path strategy**: TBD whether the stored PDF path in metadata should be relative to the project directory or absolute. Relative paths are more portable; absolute paths are unambiguous.
-
-### Per-PDF Note Panel Scoping
-Currently, if multiple PDFs are open, the side panel doesn't always distinguish between them. The panel should detect which PDF tab is active and load only the annotations for that specific document, switching automatically when the user changes tabs.
 
 ### Typed Annotations and PDF Q&A
 Add more interaction modes beyond voice:

@@ -28,6 +28,10 @@ backend/.env
 .DS_Store
 Thumbs.db
 
+# Notes (personal annotations)
+notes/
+backend/notes/
+
 # Review examples (private)
 review-examples/
 

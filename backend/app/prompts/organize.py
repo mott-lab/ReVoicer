@@ -9,7 +9,7 @@ ORGANIZE_BY_SECTION_PROMPT = ChatPromptTemplate.from_messages([
         "Infer section names from the highlighted text context and page numbers.\n"
         "If you cannot determine the section, use \"Uncategorized\".\n\n"
         "Return a JSON object with this exact structure:\n"
-        '{{"groups": [{{"title": "Section Name", "note_ids": [1, 3, 5]}}]}}\n\n'
+        '{{"groups": [{{"title": "Section Name", "note_ids": ["id1", "id2", "id3"]}}]}}\n\n'
         "Only output valid JSON. No other text."
     )),
     ("human", "Here are the annotations:\n\n{notes_json}"),
@@ -29,7 +29,7 @@ ORGANIZE_BY_THEME_PROMPT = ChatPromptTemplate.from_messages([
         "- Motivation/framing\n\n"
         "Create 2-6 thematic groups based on the actual content of the annotations.\n\n"
         "Return a JSON object with this exact structure:\n"
-        '{{"groups": [{{"title": "Theme Name", "note_ids": [1, 3, 5]}}]}}\n\n'
+        '{{"groups": [{{"title": "Theme Name", "note_ids": ["id1", "id2", "id3"]}}]}}\n\n'
         "Only output valid JSON. No other text."
     )),
     ("human", "Here are the annotations:\n\n{notes_json}"),

@@ -1,10 +1,17 @@
 // PDF Converser - PDF Identifier Utility
 
 /**
- * Extract a stable identifier from the current PDF URL.
- * Strips transient query params to get a consistent ID across sessions.
+ * Extract a stable identifier from the current PDF.
+ * Prefers the content hash (SHA-256 of first 64KB) computed by viewer.js,
+ * which survives renames and moves. Falls back to URL-based identifier.
  */
 function getPdfIdentifier() {
+  // Prefer content hash computed by viewer.js from PDF bytes
+  if (window.__pdfContentHash) {
+    return window.__pdfContentHash;
+  }
+
+  // Fallback: URL-based identifier
   const url = new URL(window.location.href);
 
   // If we're in our own viewer, the real PDF URL is in the ?file= param

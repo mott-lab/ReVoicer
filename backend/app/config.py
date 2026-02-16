@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite+aiosqlite:///./pdf_converser.db"
+    notes_dir: str = "./notes"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     llm_provider: str = "openai"  # "openai" or "ollama"

@@ -1,15 +1,18 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_db
+from app.config import get_settings
 from app.routers import export, notes, organize, transcribe
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    # Ensure notes directory exists
+    notes_dir = Path(get_settings().notes_dir)
+    notes_dir.mkdir(parents=True, exist_ok=True)
     yield
 
 

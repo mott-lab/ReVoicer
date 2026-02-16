@@ -77,3 +77,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.sidePanel.open({ tabId: sender.tab.id });
   }
 });
+
+// === Tab Switch Detection ===
+// When the user switches tabs, notify the sidebar so it can reload notes for the new PDF.
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  chrome.tabs.sendMessage(activeInfo.tabId, { action: 'getPdfId' }, (response) => {
+    if (chrome.runtime.lastError) {
+      // Content script not available — try to extract from viewer URL
+      chrome.tabs.get(activeInfo.tabId, (tab) => {
+        if (chrome.runtime.lastError) return;
+        const tabUrl = tab?.url || '';
+        let pdfIdentifier = null;
+        let pdfTitle = null;
+        if (tabUrl.includes('viewer.html')) {
+          pdfIdentifier = new URL(tabUrl).searchParams.get('file');
+          pdfTitle = tab.title || null;
+        }
+        chrome.runtime.sendMessage({
+          action: 'tabChanged',
+          pdfIdentifier,
+          pdfTitle,
+        }).catch(() => {});
+      });
+    } else {
+      chrome.runtime.sendMessage({
+        action: 'tabChanged',
+        pdfIdentifier: response?.pdfIdentifier || null,
+        pdfTitle: response?.pdfTitle || null,
+      }).catch(() => {});
+    }
+  });
+});

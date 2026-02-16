@@ -32,13 +32,15 @@ class ApiClient {
     return resp.json();
   }
 
-  async deleteNote(noteId) {
-    const resp = await fetch(`${this.baseUrl}/notes/${noteId}`, { method: 'DELETE' });
+  async deleteNote(noteId, pdfIdentifier) {
+    const params = new URLSearchParams({ pdf_identifier: pdfIdentifier });
+    const resp = await fetch(`${this.baseUrl}/notes/${noteId}?${params}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error(`API error: ${resp.status}`);
   }
 
-  async recleanNote(noteId) {
-    const resp = await fetch(`${this.baseUrl}/notes/${noteId}/reclean`, { method: 'PUT' });
+  async recleanNote(noteId, pdfIdentifier) {
+    const params = new URLSearchParams({ pdf_identifier: pdfIdentifier });
+    const resp = await fetch(`${this.baseUrl}/notes/${noteId}/reclean?${params}`, { method: 'PUT' });
     if (!resp.ok) throw new Error(`API error: ${resp.status}`);
     return resp.json();
   }

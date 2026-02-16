@@ -19,10 +19,24 @@ async function init() {
     }
   });
 
-  // Listen for new notes
+  // Listen for new notes and tab switches
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'noteCreated' && msg.pdfIdentifier === currentPdfId) {
       loadNotes();
+    }
+    if (msg.action === 'tabChanged') {
+      const newId = msg.pdfIdentifier;
+      if (newId && newId !== currentPdfId) {
+        currentPdfId = newId;
+        document.getElementById('pdf-title').textContent = msg.pdfTitle || 'Untitled PDF';
+        document.getElementById('view-mode').value = 'chronological';
+        loadNotes();
+      } else if (!newId) {
+        currentPdfId = null;
+        document.getElementById('pdf-title').textContent = 'No PDF open';
+        document.getElementById('notes-container').innerHTML =
+          '<p class="empty-state">Open a PDF to see annotations.</p>';
+      }
     }
   });
 
@@ -94,7 +108,7 @@ function renderNotesList(notes, container) {
   container.querySelectorAll('.note-delete').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (confirm('Delete this annotation?')) {
-        await api.deleteNote(btn.dataset.id);
+        await api.deleteNote(btn.dataset.id, currentPdfId);
         loadNotes(document.getElementById('view-mode').value);
       }
     });
@@ -105,7 +119,7 @@ function renderNotesList(notes, container) {
       btn.textContent = 'Cleaning...';
       btn.disabled = true;
       try {
-        await api.recleanNote(btn.dataset.id);
+        await api.recleanNote(btn.dataset.id, currentPdfId);
         loadNotes(document.getElementById('view-mode').value);
       } catch (err) {
         btn.textContent = 'Re-clean';

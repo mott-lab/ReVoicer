@@ -14,7 +14,7 @@ class NoteCreate(BaseModel):
 
 
 class NoteResponse(BaseModel):
-    id: int
+    id: str
     pdf_identifier: str
     pdf_title: str | None
     selected_text: str
