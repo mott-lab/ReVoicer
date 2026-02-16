@@ -5,25 +5,34 @@
 #pdf-converser-fab {
   position: absolute;
   z-index: 2147483647;
-  width: 36px;
-  height: 36px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  background: #2a2a3e;
+  border-radius: 20px;
+  padding: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  user-select: none;
+}
+
+.pcr-fab-btn {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
+  border: none;
   background: #4285f4;
   color: white;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s ease, background-color 0.15s ease;
-  user-select: none;
-  border: none;
   padding: 0;
+  transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
-#pdf-converser-fab:hover {
-  transform: scale(1.15);
+.pcr-fab-btn:hover {
   background: #3367d6;
+  transform: scale(1.1);
 }
 
 /* === Recording Overlay === */
@@ -127,6 +136,72 @@
 
 .pcr-cancel-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* === Text Input Overlay === */
+
+#pdf-converser-text-input {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 16px 24px;
+  border-radius: 12px;
+  min-width: 340px;
+  max-width: 520px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pcr-textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 200px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.pcr-textarea:focus {
+  outline: none;
+  border-color: #4285f4;
+}
+
+.pcr-textarea::placeholder {
+  color: #666;
+}
+
+.pcr-cleanup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.pcr-cleanup-toggle input[type="checkbox"] {
+  accent-color: #4285f4;
+}
+
+.pcr-hint {
+  font-size: 11px;
+  color: #666;
+  margin-right: auto;
+  align-self: center;
 }
 
 /* === Toast Notifications === */

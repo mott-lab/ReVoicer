@@ -11,6 +11,7 @@ class NoteCreate(BaseModel):
     selected_text: str
     page_number: int = 0
     raw_transcript: str
+    skip_cleanup: bool = False
 
 
 class NoteResponse(BaseModel):

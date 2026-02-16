@@ -1,7 +1,7 @@
 import json
 import re
 
-from app.prompts.cleanup import CLEANUP_PROMPT
+from app.prompts.cleanup import CLASSIFY_PROMPT, CLEANUP_PROMPT
 from app.services.llm_service import get_llm
 
 VALID_TYPES = {
@@ -42,3 +42,29 @@ async def cleanup_transcript(
         comment_type = "summary"
 
     return comment, comment_type
+
+
+async def classify_comment_type(selected_text: str, comment: str) -> str:
+    """Classify a typed annotation without rewriting it. Returns comment_type."""
+    llm = get_llm()
+    chain = CLASSIFY_PROMPT | llm
+    result = await chain.ainvoke({
+        "selected_text": selected_text,
+        "comment": comment,
+    })
+
+    content = result.content.strip()
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+        else:
+            return "summary"
+
+    comment_type = parsed.get("type", "summary")
+    if comment_type not in VALID_TYPES:
+        comment_type = "summary"
+
+    return comment_type

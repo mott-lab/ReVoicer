@@ -6,6 +6,7 @@ const speechCapture = new SpeechCapture();
 
 let fab = null;
 let recordingOverlay = null;
+let textInputOverlay = null;
 let currentSelectedText = '';
 
 // Initialize
@@ -43,14 +44,23 @@ function showFab(x, y) {
     fab = document.createElement('div');
     fab.id = 'pdf-converser-fab';
     fab.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-        <line x1="12" y1="19" x2="12" y2="23"/>
-        <line x1="8" y1="23" x2="16" y2="23"/>
-      </svg>
+      <button class="pcr-fab-btn" id="pcr-fab-mic" title="Voice annotation">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+      <button class="pcr-fab-btn" id="pcr-fab-text" title="Text annotation">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/>
+          <line x1="9" y1="7" x2="15" y2="7"/>
+          <line x1="9" y1="11" x2="15" y2="11"/>
+          <line x1="9" y1="15" x2="13" y2="15"/>
+        </svg>
+      </button>
     `;
-    fab.title = 'Add voice annotation (PDF Converser)';
     document.body.appendChild(fab);
   }
 
@@ -61,9 +71,13 @@ function showFab(x, y) {
   fab.style.top = `${y + scrollY - 45}px`;
   fab.style.display = 'flex';
 
-  fab.onclick = (e) => {
+  document.getElementById('pcr-fab-mic').onclick = (e) => {
     e.stopPropagation();
     startRecording(currentSelectedText);
+  };
+  document.getElementById('pcr-fab-text').onclick = (e) => {
+    e.stopPropagation();
+    startTextInput(currentSelectedText);
   };
 }
 
@@ -146,6 +160,79 @@ function hideRecordingUI() {
   }
 }
 
+// === Text Input ===
+
+function startTextInput(selectedText) {
+  hideFab();
+  showTextInputUI(selectedText);
+}
+
+function showTextInputUI(selectedText) {
+  textInputOverlay = document.createElement('div');
+  textInputOverlay.id = 'pdf-converser-text-input';
+
+  const truncatedText = selectedText.length > 120
+    ? selectedText.substring(0, 120) + '...'
+    : selectedText;
+
+  textInputOverlay.innerHTML = `
+    <div class="pcr-header">
+      <span class="pcr-header-text">Type your annotation</span>
+    </div>
+    <div class="pcr-selected-text">"${escapeHtml(truncatedText)}"</div>
+    <textarea class="pcr-textarea" id="pcr-text-area" placeholder="Type your annotation here..." rows="4"></textarea>
+    <label class="pcr-cleanup-toggle">
+      <input type="checkbox" id="pcr-cleanup-checkbox" checked>
+      <span>Clean up with LLM</span>
+    </label>
+    <div class="pcr-actions">
+      <span class="pcr-hint">Ctrl+Enter to submit</span>
+      <button class="pcr-cancel-btn" id="pcr-text-cancel">Cancel</button>
+      <button class="pcr-stop-btn" id="pcr-text-submit">Submit</button>
+    </div>
+  `;
+  document.body.appendChild(textInputOverlay);
+
+  const textarea = document.getElementById('pcr-text-area');
+  textarea.focus();
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      submitFromTextInput(selectedText);
+    }
+  });
+
+  document.getElementById('pcr-text-submit').onclick = () => {
+    submitFromTextInput(selectedText);
+  };
+
+  document.getElementById('pcr-text-cancel').onclick = () => {
+    hideTextInputUI();
+  };
+}
+
+function submitFromTextInput(selectedText) {
+  const textarea = document.getElementById('pcr-text-area');
+  const checkbox = document.getElementById('pcr-cleanup-checkbox');
+  const text = textarea.value.trim();
+
+  if (!text) {
+    showToast('Please type an annotation.', 'error');
+    return;
+  }
+
+  hideTextInputUI();
+  submitTypedNote(selectedText, text, !checkbox.checked);
+}
+
+function hideTextInputUI() {
+  if (textInputOverlay) {
+    textInputOverlay.remove();
+    textInputOverlay = null;
+  }
+}
+
 // === Note Submission ===
 
 async function submitNote(selectedText, rawTranscript, audioBlob) {
@@ -191,6 +278,39 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
     showToast(`[${typeLabel}] ${preview}`, 'success');
 
     // Notify sidebar to refresh
+    chrome.runtime.sendMessage({
+      action: 'noteCreated',
+      pdfIdentifier: pdfId,
+    }).catch(() => {});
+  } catch (err) {
+    console.error('PDF Converser - submission error:', err);
+    showToast('Failed to save annotation. Is the backend running?', 'error');
+  }
+}
+
+async function submitTypedNote(selectedText, typedText, skipCleanup) {
+  const pdfId = getPdfIdentifier();
+  const pageNum = getCurrentPageNumber();
+  const pdfTitle = getPdfTitle();
+
+  showToast('Processing annotation...', 'info');
+
+  try {
+    const note = await apiClient.createNote({
+      pdf_identifier: pdfId,
+      pdf_title: pdfTitle,
+      selected_text: selectedText,
+      page_number: pageNum,
+      raw_transcript: typedText,
+      skip_cleanup: skipCleanup,
+    });
+
+    const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
+    const preview = note.cleaned_comment.length > 70
+      ? note.cleaned_comment.substring(0, 70) + '...'
+      : note.cleaned_comment;
+    showToast(`[${typeLabel}] ${preview}`, 'success');
+
     chrome.runtime.sendMessage({
       action: 'noteCreated',
       pdfIdentifier: pdfId,

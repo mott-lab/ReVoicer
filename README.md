@@ -61,14 +61,12 @@ NOTES_DIR=./notes                  # Where annotation JSON files are stored
 
 ## Usage
 
-### Recording Annotations
+### Adding Annotations
 
 1. Open any PDF in Chrome (local files or web URLs)
-2. Highlight a passage of text
-3. Click the blue microphone button that appears
-4. Speak your annotation — you'll see a live preview of your words
-5. Click **Done** when finished
-6. The annotation is transcribed via Whisper, cleaned by the LLM, and saved
+2. Highlight a passage of text — a small toolbar appears with two buttons
+3. **Voice**: Click the microphone button, speak your annotation, and click **Done**. Your speech is transcribed via Whisper, cleaned by the LLM, and saved.
+4. **Text**: Click the text button, type your annotation, and press **Submit** (or Ctrl+Enter). By default, your text is cleaned up by the LLM — uncheck "Clean up with LLM" to save it as-is.
 
 ### Viewing Annotations
 
@@ -135,10 +133,17 @@ This content-hash approach means:
 
 These are not currently implemented but are tracked here for future development.
 
-### Typed Annotations and PDF Q&A
-Add more interaction modes beyond voice:
-- **Text input**: Let the user type an annotation directly. Offer the choice to save it as-is or run it through the LLM for cleanup.
-- **PDF Q&A**: Allow the user to ask a question about the entire PDF (e.g., "Does this paper address point XYZ later on?"). This would require sending the full PDF text to the LLM context, or using a retrieval-augmented approach over the document.
+### Full-Document Context
+Extract and store the full PDF text (page-by-page, via PDF.js `getTextContent()` in the viewer, sent to the backend). This unlocks a cluster of features that all depend on the LLM being able to see beyond the highlighted snippet:
+
+- **Cross-referencing**: When you comment on a result, the LLM links it back to the method or measure that produced it. Comment on a claim in the Discussion and it finds the supporting data in Results. Comment near a figure reference and it pulls the surrounding description.
+- **Context-aware annotation cleanup**: Currently the LLM only sees the highlighted text + your speech. With full-document context, it can resolve ambiguous references ("this result" becomes the specific finding), identify what section you're actually in, and classify comment types more accurately.
+- **Accurate section detection**: The "By Section" organize view currently guesses sections from note snippets. With real section headers extracted from the full text, section mapping becomes exact.
+- **PDF Q&A**: Ask questions about the entire paper (e.g., "Does this paper address limitation X later on?", "What was the sample size?", "How do they define this term?"). Could use direct LLM context for shorter papers or a retrieval-augmented approach for longer ones.
+- **Citation-aware related work**: When you make a "related work" annotation mentioning another paper, the system checks the references section and surfaces the full citation.
+- **Auto-generated paper summary**: Produce a structured summary of the paper to provide context alongside your annotations in exports.
+
+**Implementation sketch**: The viewer already has access to all page text content via PDF.js. On PDF load, extract all text page-by-page and send it to a backend endpoint that stores it alongside the note file (or within it). The cleanup prompt and organize prompts can then include relevant document context. For longer papers, a chunking/retrieval strategy (e.g., embedding-based search over page chunks) would keep token usage manageable.
 
 ### Inline Highlights with Bidirectional Linking
 Render persistent highlights on annotated text in the PDF viewer (color-coded by comment type). Link highlights and the note panel bidirectionally: clicking a highlight in the PDF scrolls the side panel to that annotation, and clicking an annotation in the side panel scrolls the PDF viewer to the highlighted passage. This would require storing the text range/position for each annotation and rendering highlight overlays on the text layer.

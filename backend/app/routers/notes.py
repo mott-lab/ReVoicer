@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import NoteCreate, NoteListResponse, NoteResponse
-from app.services.cleanup_service import cleanup_transcript
+from app.services.cleanup_service import classify_comment_type, cleanup_transcript
 from app.services.note_store import get_note_store
 
 router = APIRouter()
@@ -9,9 +9,16 @@ router = APIRouter()
 
 @router.post("/", response_model=NoteResponse, status_code=201)
 async def create_note(note_in: NoteCreate):
-    cleaned, comment_type = await cleanup_transcript(
-        note_in.selected_text, note_in.raw_transcript
-    )
+    if note_in.skip_cleanup:
+        # Typed annotation: keep text as-is, just classify the type
+        cleaned = note_in.raw_transcript
+        comment_type = await classify_comment_type(
+            note_in.selected_text, note_in.raw_transcript
+        )
+    else:
+        cleaned, comment_type = await cleanup_transcript(
+            note_in.selected_text, note_in.raw_transcript
+        )
 
     store = get_note_store()
     note = await store.create_note(
