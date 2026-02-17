@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import export, notes, organize, transcribe
+from app.routers import documents, export, notes, organize, qa, transcribe
 
 
 @asynccontextmanager
@@ -30,6 +30,8 @@ app.include_router(notes.router, prefix="/api/notes", tags=["notes"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(organize.router, prefix="/api/organize", tags=["organize"])
 app.include_router(transcribe.router, prefix="/api", tags=["transcribe"])
+app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(qa.router, prefix="/api/qa", tags=["qa"])
 
 
 @app.get("/api/health")

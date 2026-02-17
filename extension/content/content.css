@@ -138,6 +138,22 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+.pcr-ask-btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+  background: #ffa726;
+  color: #1a1a2e;
+}
+
+.pcr-ask-btn:hover {
+  background: #fb8c00;
+}
+
 /* === Text Input Overlay === */
 
 #pdf-converser-text-input {
@@ -281,4 +297,47 @@
 /* Make annotated text spans clickable */
 .text-layer span[data-note-ids] {
   cursor: pointer;
+}
+
+/* === Answer Overlay === */
+
+#pdf-converser-answer {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  padding: 16px 24px;
+  border-radius: 12px;
+  min-width: 340px;
+  max-width: 600px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pcr-answer-text {
+  padding: 8px 0;
+  max-height: 300px;
+  overflow-y: auto;
+  color: #e0e0e0;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.pcr-answer-error {
+  color: #ffcdd2;
+}
+
+.pcr-answer-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  color: #aaa;
+  font-size: 13px;
 }

@@ -85,6 +85,33 @@ class ApiClient {
     return resp.json();
   }
 
+  async uploadDocumentText(pdfIdentifier, pageTexts) {
+    const resp = await fetch(`${this.baseUrl}/documents/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf_identifier: pdfIdentifier, pages: pageTexts }),
+    });
+    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+    return resp.json();
+  }
+
+  async askQuestion(pdfIdentifier, question, selectedText) {
+    const resp = await fetch(`${this.baseUrl}/qa/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pdf_identifier: pdfIdentifier,
+        question,
+        selected_text: selectedText || null,
+      }),
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`API error ${resp.status}: ${text}`);
+    }
+    return resp.json();
+  }
+
   async checkHealth() {
     const resp = await fetch(`${this.baseUrl}/health`);
     return resp.ok;

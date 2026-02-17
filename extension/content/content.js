@@ -10,6 +10,8 @@ let textInputOverlay = null;
 let currentSelectedText = '';
 let currentSelectionRange = null;
 let cachedNotes = [];
+let answerOverlay = null;
+let askMode = false;
 
 // Initialize
 (async () => {
@@ -17,6 +19,15 @@ let cachedNotes = [];
   // Load existing highlights once pages start rendering
   document.addEventListener('pdfpagerendered', (e) => {
     renderHighlightsForPage(e.detail.pageNum);
+  });
+  // Upload document text when extraction completes
+  document.addEventListener('pdftextextracted', (e) => {
+    const pdfId = getPdfIdentifier();
+    if (pdfId) {
+      apiClient.uploadDocumentText(pdfId, e.detail.pageTexts).catch(err => {
+        console.log('PDF Converser: Could not upload document text', err.message);
+      });
+    }
   });
   // Initial load of notes (delay to let pages render)
   setTimeout(() => loadAndRenderHighlights(), 1000);
@@ -114,6 +125,7 @@ function hideFab() {
 
 function startRecording(selectedText) {
   hideFab();
+  askMode = false;
   showRecordingUI(selectedText);
 
   speechCapture.onResult = (finalText, interimText) => {
@@ -122,7 +134,23 @@ function startRecording(selectedText) {
 
   speechCapture.onEnd = async (transcript, audioBlob) => {
     hideRecordingUI();
-    if (transcript.trim() || audioBlob) {
+    if (askMode) {
+      // Transcribe with Whisper for better quality, then ask
+      let finalQuestion = transcript.trim();
+      if (audioBlob && audioBlob.size > 0) {
+        try {
+          const whisperResult = await apiClient.transcribe(audioBlob);
+          if (whisperResult.text) finalQuestion = whisperResult.text;
+        } catch (err) {
+          console.log('PDF Converser: Whisper unavailable for Q&A, using Web Speech API', err.message);
+        }
+      }
+      if (finalQuestion) {
+        submitQuestion(selectedText, finalQuestion);
+      } else {
+        showToast('No speech detected. Try again.', 'error');
+      }
+    } else if (transcript.trim() || audioBlob) {
       await submitNote(selectedText, transcript.trim(), audioBlob);
     }
   };
@@ -158,12 +186,20 @@ function showRecordingUI(selectedText) {
     <div class="pcr-transcript" id="pcr-live-transcript">Listening...</div>
     <div class="pcr-actions">
       <button class="pcr-cancel-btn" id="pcr-cancel-btn">Cancel</button>
+      <button class="pcr-ask-btn" id="pcr-ask-btn">Ask</button>
       <button class="pcr-stop-btn" id="pcr-stop-btn">Done</button>
     </div>
   `;
   document.body.appendChild(recordingOverlay);
 
-  document.getElementById('pcr-stop-btn').onclick = () => speechCapture.stop();
+  document.getElementById('pcr-stop-btn').onclick = () => {
+    askMode = false;
+    speechCapture.stop();
+  };
+  document.getElementById('pcr-ask-btn').onclick = () => {
+    askMode = true;
+    speechCapture.stop();
+  };
   document.getElementById('pcr-cancel-btn').onclick = () => {
     speechCapture.transcript = ''; // Clear transcript so onEnd doesn't submit
     speechCapture.stop();
@@ -209,8 +245,9 @@ function showTextInputUI(selectedText) {
       <span>Clean up with LLM</span>
     </label>
     <div class="pcr-actions">
-      <span class="pcr-hint">Ctrl+Enter to submit</span>
+      <span class="pcr-hint">Ctrl+Enter submit · Ctrl+Shift+Enter ask</span>
       <button class="pcr-cancel-btn" id="pcr-text-cancel">Cancel</button>
+      <button class="pcr-ask-btn" id="pcr-text-ask">Ask</button>
       <button class="pcr-stop-btn" id="pcr-text-submit">Submit</button>
     </div>
   `;
@@ -220,7 +257,10 @@ function showTextInputUI(selectedText) {
   textarea.focus();
 
   textarea.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+      e.preventDefault();
+      askFromTextInput(selectedText);
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       submitFromTextInput(selectedText);
     }
@@ -228,6 +268,10 @@ function showTextInputUI(selectedText) {
 
   document.getElementById('pcr-text-submit').onclick = () => {
     submitFromTextInput(selectedText);
+  };
+
+  document.getElementById('pcr-text-ask').onclick = () => {
+    askFromTextInput(selectedText);
   };
 
   document.getElementById('pcr-text-cancel').onclick = () => {
@@ -249,10 +293,79 @@ function submitFromTextInput(selectedText) {
   submitTypedNote(selectedText, text, !checkbox.checked);
 }
 
+function askFromTextInput(selectedText) {
+  const textarea = document.getElementById('pcr-text-area');
+  const text = textarea.value.trim();
+
+  if (!text) {
+    showToast('Please type a question.', 'error');
+    return;
+  }
+
+  hideTextInputUI();
+  submitQuestion(selectedText, text);
+}
+
 function hideTextInputUI() {
   if (textInputOverlay) {
     textInputOverlay.remove();
     textInputOverlay = null;
+  }
+}
+
+// === PDF Q&A ===
+
+async function submitQuestion(selectedText, question) {
+  const pdfId = getPdfIdentifier();
+  if (!pdfId) {
+    showToast('No PDF identifier available.', 'error');
+    return;
+  }
+
+  showAnswerOverlay(question, null, true);
+
+  try {
+    const result = await apiClient.askQuestion(pdfId, question, selectedText);
+    showAnswerOverlay(question, result.answer, false);
+  } catch (err) {
+    console.error('PDF Converser - Q&A error:', err);
+    showAnswerOverlay(question, 'Failed to get answer. Is the backend running?', false, true);
+  }
+}
+
+function showAnswerOverlay(question, answerText, isLoading, isError = false) {
+  hideAnswerOverlay();
+
+  answerOverlay = document.createElement('div');
+  answerOverlay.id = 'pdf-converser-answer';
+
+  const truncatedQuestion = question.length > 200
+    ? question.substring(0, 200) + '...'
+    : question;
+
+  const contentHtml = isLoading
+    ? '<div class="pcr-answer-loading"><span class="pcr-pulse"></span> Thinking...</div>'
+    : `<div class="pcr-answer-text ${isError ? 'pcr-answer-error' : ''}">${escapeHtml(answerText)}</div>`;
+
+  answerOverlay.innerHTML = `
+    <div class="pcr-header">
+      <span class="pcr-header-text">Answer</span>
+    </div>
+    <div class="pcr-selected-text">"${escapeHtml(truncatedQuestion)}"</div>
+    ${contentHtml}
+    <div class="pcr-actions">
+      <button class="pcr-cancel-btn" id="pcr-answer-close">Close</button>
+    </div>
+  `;
+  document.body.appendChild(answerOverlay);
+
+  document.getElementById('pcr-answer-close').onclick = () => hideAnswerOverlay();
+}
+
+function hideAnswerOverlay() {
+  if (answerOverlay) {
+    answerOverlay.remove();
+    answerOverlay = null;
   }
 }
 

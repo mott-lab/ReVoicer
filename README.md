@@ -70,6 +70,17 @@ NOTES_DIR=./notes                  # Where annotation JSON files are stored
 
 Annotated text is highlighted in the PDF with colors matching the comment type. Click a highlight to jump to that annotation in the side panel. Click an annotation in the side panel to scroll the PDF to the highlighted passage.
 
+### Asking Questions
+
+You can ask questions about the entire paper from within either the voice or text annotation workflow:
+
+1. Highlight text (optional — provides context for your question)
+2. Open the voice or text input as usual
+3. Speak or type your question, then click **Ask** (or press **Ctrl+Shift+Enter** in text mode)
+4. The answer appears in an overlay, drawing on the full document text
+
+The full text of each PDF is automatically extracted and uploaded to the backend when you first open it.
+
 ### Viewing Annotations
 
 Click the PDF Converser extension icon and select **Open Notes Panel** to open the side panel. Annotations can be viewed in four modes:
@@ -135,17 +146,15 @@ This content-hash approach means:
 
 These are not currently implemented but are tracked here for future development.
 
-### Full-Document Context
-Extract and store the full PDF text (page-by-page, via PDF.js `getTextContent()` in the viewer, sent to the backend). This unlocks a cluster of features that all depend on the LLM being able to see beyond the highlighted snippet:
+### Full-Document Context Extensions
+The full PDF text is now extracted and stored (page-by-page) on every PDF open, and PDF Q&A is implemented. The following features can build on this stored text:
 
-- **Cross-referencing**: When you comment on a result, the LLM links it back to the method or measure that produced it. Comment on a claim in the Discussion and it finds the supporting data in Results. Comment near a figure reference and it pulls the surrounding description.
-- **Context-aware annotation cleanup**: Currently the LLM only sees the highlighted text + your speech. With full-document context, it can resolve ambiguous references ("this result" becomes the specific finding), identify what section you're actually in, and classify comment types more accurately.
-- **Accurate section detection**: The "By Section" organize view currently guesses sections from note snippets. With real section headers extracted from the full text, section mapping becomes exact.
-- **PDF Q&A**: Ask questions about the entire paper (e.g., "Does this paper address limitation X later on?", "What was the sample size?", "How do they define this term?"). Could use direct LLM context for shorter papers or a retrieval-augmented approach for longer ones.
-- **Citation-aware related work**: When you make a "related work" annotation mentioning another paper, the system checks the references section and surfaces the full citation.
+- **Cross-referencing**: When you comment on a result, the LLM links it back to the method or measure that produced it. Comment on a claim in the Discussion and it finds the supporting data in Results.
+- **Context-aware annotation cleanup**: Include document context in the cleanup prompt so the LLM can resolve ambiguous references and classify comment types more accurately.
+- **Accurate section detection**: Use real section headers from the full text to make the "By Section" organize view exact instead of guessing from note snippets.
+- **Citation-aware related work**: When you make a "related work" annotation, the system checks the references section and surfaces the full citation.
 - **Auto-generated paper summary**: Produce a structured summary of the paper to provide context alongside your annotations in exports.
-
-**Implementation sketch**: The viewer already has access to all page text content via PDF.js. On PDF load, extract all text page-by-page and send it to a backend endpoint that stores it alongside the note file (or within it). The cleanup prompt and organize prompts can then include relevant document context. For longer papers, a chunking/retrieval strategy (e.g., embedding-based search over page chunks) would keep token usage manageable.
+- **RAG for long documents**: Add embedding-based retrieval for papers that exceed the LLM's context window.
 
 ### Review-Oriented Export
 Add export templates tailored to specific workflows:

@@ -42,3 +42,18 @@ class NoteGroupResponse(BaseModel):
 
 class OrganizedNotesResponse(BaseModel):
     groups: list[NoteGroupResponse]
+
+
+class DocumentTextUpload(BaseModel):
+    pdf_identifier: str
+    pages: dict[str, str]
+
+
+class QARequest(BaseModel):
+    pdf_identifier: str
+    question: str
+    selected_text: str | None = None
+
+
+class QAResponse(BaseModel):
+    answer: str

@@ -7,6 +7,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('viewer/pdfjs/pdf
 
 let pdfDoc = null;
 let currentScale = 1.5;
+const pageTexts = {};
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 4.0;
 const SCALE_STEP = 0.25;
@@ -65,6 +66,10 @@ async function loadPdf(url) {
       document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i } }));
     }
 
+    // Expose page texts for content script and dispatch extraction event
+    window.__pdfPageTexts = pageTexts;
+    document.dispatchEvent(new CustomEvent('pdftextextracted', { detail: { pageTexts } }));
+
     // Fit to width on initial load
     fitToWidth();
   } catch (err) {
@@ -104,6 +109,9 @@ async function renderPage(pageNum, container) {
   // Render text layer
   const textContent = await page.getTextContent();
   renderTextLayer(textContent, textLayerDiv, viewport);
+
+  // Accumulate page text for full-document context
+  pageTexts[pageNum] = textContent.items.map(item => item.str).join(' ');
 }
 
 function renderTextLayer(textContent, container, viewport) {
