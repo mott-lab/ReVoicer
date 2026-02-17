@@ -12,6 +12,7 @@ class NoteCreate(BaseModel):
     page_number: int = 0
     raw_transcript: str
     skip_cleanup: bool = False
+    highlight_data: dict | None = None
 
 
 class NoteResponse(BaseModel):
@@ -23,6 +24,7 @@ class NoteResponse(BaseModel):
     raw_transcript: str
     cleaned_comment: str
     comment_type: str
+    highlight_data: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

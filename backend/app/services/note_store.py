@@ -81,6 +81,7 @@ class NoteStore:
         raw_transcript: str,
         cleaned_comment: str,
         comment_type: str,
+        highlight_data: dict | None = None,
     ) -> dict[str, Any]:
         note = {
             "id": str(uuid.uuid4()),
@@ -89,6 +90,7 @@ class NoteStore:
             "raw_transcript": raw_transcript,
             "cleaned_comment": cleaned_comment,
             "comment_type": comment_type,
+            "highlight_data": highlight_data,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 

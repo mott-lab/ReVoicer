@@ -62,6 +62,7 @@ async function loadPdf(url) {
     // Render all pages
     for (let i = 1; i <= pdfDoc.numPages; i++) {
       await renderPage(i, pagesContainer);
+      document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i } }));
     }
 
     // Fit to width on initial load
@@ -107,12 +108,14 @@ async function renderPage(pageNum, container) {
 
 function renderTextLayer(textContent, container, viewport) {
   const items = textContent.items;
+  let spanIndex = 0;
 
   for (const item of items) {
     if (!item.str) continue;
 
     const span = document.createElement('span');
     span.textContent = item.str;
+    span.dataset.index = String(spanIndex++);
 
     // Position the text span to overlay the canvas text
     const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
@@ -146,6 +149,7 @@ async function rerender() {
   pagesContainer.innerHTML = '';
   for (let i = 1; i <= pdfDoc.numPages; i++) {
     await renderPage(i, pagesContainer);
+    document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i } }));
   }
 }
 

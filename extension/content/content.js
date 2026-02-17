@@ -8,10 +8,18 @@ let fab = null;
 let recordingOverlay = null;
 let textInputOverlay = null;
 let currentSelectedText = '';
+let currentSelectionRange = null;
+let cachedNotes = [];
 
 // Initialize
 (async () => {
   await apiClient.init();
+  // Load existing highlights once pages start rendering
+  document.addEventListener('pdfpagerendered', (e) => {
+    renderHighlightsForPage(e.detail.pageNum);
+  });
+  // Initial load of notes (delay to let pages render)
+  setTimeout(() => loadAndRenderHighlights(), 1000);
 })();
 
 // === Text Selection Detection ===
@@ -24,9 +32,24 @@ document.addEventListener('mouseup', (e) => {
 
     if (selectedText && selectedText.length > 0) {
       currentSelectedText = selectedText;
+      // Clone the range before it's lost on next interaction
+      if (selection.rangeCount > 0) {
+        currentSelectionRange = selection.getRangeAt(0).cloneRange();
+      }
       showFab(e.clientX, e.clientY);
     } else {
       hideFab();
+      // Check if this was a click (not drag) on a highlighted span
+      const target = e.target.closest?.('[data-note-ids]');
+      if (target) {
+        const noteIds = target.dataset.noteIds.split(',');
+        if (noteIds.length > 0) {
+          chrome.runtime.sendMessage({
+            action: 'scrollToNote',
+            noteId: noteIds[0],
+          }).catch(() => {});
+        }
+      }
     }
   }, 50);
 });
@@ -233,12 +256,38 @@ function hideTextInputUI() {
   }
 }
 
+// === Highlight Data Capture ===
+
+function captureHighlightData() {
+  if (!currentSelectionRange) return null;
+
+  const range = currentSelectionRange;
+  const startNode = range.startContainer;
+  const endNode = range.endContainer;
+
+  // Find the parent text-layer spans
+  const startEl = startNode.nodeType === Node.TEXT_NODE ? startNode.parentElement : startNode;
+  const endEl = endNode.nodeType === Node.TEXT_NODE ? endNode.parentElement : endNode;
+
+  // Verify they're in a text layer with data-index
+  if (!startEl?.dataset?.index || !endEl?.dataset?.index) return null;
+  if (!startEl.closest('.text-layer') || !endEl.closest('.text-layer')) return null;
+
+  return {
+    startSpanIndex: parseInt(startEl.dataset.index, 10),
+    startOffset: range.startOffset,
+    endSpanIndex: parseInt(endEl.dataset.index, 10),
+    endOffset: range.endOffset,
+  };
+}
+
 // === Note Submission ===
 
 async function submitNote(selectedText, rawTranscript, audioBlob) {
   const pdfId = getPdfIdentifier();
   const pageNum = getCurrentPageNumber();
   const pdfTitle = getPdfTitle();
+  const highlightData = captureHighlightData();
 
   // If we have audio, try Whisper transcription first for better quality
   let finalTranscript = rawTranscript;
@@ -269,6 +318,7 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
       selected_text: selectedText,
       page_number: pageNum,
       raw_transcript: finalTranscript,
+      highlight_data: highlightData,
     });
 
     const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
@@ -276,6 +326,10 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
       ? note.cleaned_comment.substring(0, 70) + '...'
       : note.cleaned_comment;
     showToast(`[${typeLabel}] ${preview}`, 'success');
+
+    // Add to cache and render highlight immediately
+    cachedNotes.push(note);
+    if (note.highlight_data) renderNoteHighlight(note);
 
     // Notify sidebar to refresh
     chrome.runtime.sendMessage({
@@ -292,6 +346,7 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
   const pdfId = getPdfIdentifier();
   const pageNum = getCurrentPageNumber();
   const pdfTitle = getPdfTitle();
+  const highlightData = captureHighlightData();
 
   showToast('Processing annotation...', 'info');
 
@@ -303,6 +358,7 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
       page_number: pageNum,
       raw_transcript: typedText,
       skip_cleanup: skipCleanup,
+      highlight_data: highlightData,
     });
 
     const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
@@ -310,6 +366,9 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
       ? note.cleaned_comment.substring(0, 70) + '...'
       : note.cleaned_comment;
     showToast(`[${typeLabel}] ${preview}`, 'success');
+
+    cachedNotes.push(note);
+    if (note.highlight_data) renderNoteHighlight(note);
 
     chrome.runtime.sendMessage({
       action: 'noteCreated',
@@ -319,6 +378,134 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
     console.error('PDF Converser - submission error:', err);
     showToast('Failed to save annotation. Is the backend running?', 'error');
   }
+}
+
+// === Highlight Rendering ===
+
+async function loadAndRenderHighlights() {
+  const pdfId = getPdfIdentifier();
+  if (!pdfId) return;
+
+  try {
+    const data = await apiClient.getNotes(pdfId);
+    cachedNotes = data.notes || [];
+    renderAllHighlights();
+  } catch (err) {
+    console.log('PDF Converser: Could not load highlights', err.message);
+  }
+}
+
+function renderAllHighlights() {
+  // Clear existing highlights
+  document.querySelectorAll('.pcr-highlight-layer').forEach(el => el.remove());
+  // Clear note-id tags from text spans
+  document.querySelectorAll('[data-note-ids]').forEach(el => el.removeAttribute('data-note-ids'));
+
+  for (const note of cachedNotes) {
+    if (note.highlight_data && note.page_number) {
+      renderNoteHighlight(note);
+    }
+  }
+}
+
+function renderHighlightsForPage(pageNum) {
+  // Clear existing highlights for this page
+  const page = document.querySelector(`.pdf-page[data-page-number="${pageNum}"]`);
+  if (!page) return;
+  const existingLayer = page.querySelector('.pcr-highlight-layer');
+  if (existingLayer) existingLayer.remove();
+  // Clear note-id tags for spans on this page
+  page.querySelectorAll('[data-note-ids]').forEach(el => el.removeAttribute('data-note-ids'));
+
+  for (const note of cachedNotes) {
+    if (note.highlight_data && note.page_number === pageNum) {
+      renderNoteHighlight(note);
+    }
+  }
+}
+
+function renderNoteHighlight(note) {
+  const { highlight_data, page_number, comment_type, id } = note;
+  if (!highlight_data) return;
+
+  const page = document.querySelector(`.pdf-page[data-page-number="${page_number}"]`);
+  if (!page) return;
+
+  const textLayer = page.querySelector('.text-layer');
+  if (!textLayer) return;
+
+  // Get or create highlight layer
+  let highlightLayer = page.querySelector('.pcr-highlight-layer');
+  if (!highlightLayer) {
+    highlightLayer = document.createElement('div');
+    highlightLayer.className = 'pcr-highlight-layer';
+    // Insert between canvas and text layer
+    page.insertBefore(highlightLayer, textLayer);
+  }
+
+  const { startSpanIndex, startOffset, endSpanIndex, endOffset } = highlight_data;
+
+  const startSpan = textLayer.querySelector(`span[data-index="${startSpanIndex}"]`);
+  const endSpan = textLayer.querySelector(`span[data-index="${endSpanIndex}"]`);
+  if (!startSpan || !endSpan) return;
+
+  const startTextNode = startSpan.firstChild;
+  const endTextNode = endSpan.firstChild;
+  if (!startTextNode || !endTextNode) return;
+
+  try {
+    const range = document.createRange();
+    range.setStart(startTextNode, Math.min(startOffset, startTextNode.length));
+    range.setEnd(endTextNode, Math.min(endOffset, endTextNode.length));
+
+    const rects = range.getClientRects();
+    const pageRect = page.getBoundingClientRect();
+
+    for (const rect of rects) {
+      if (rect.width === 0 || rect.height === 0) continue;
+      const highlight = document.createElement('div');
+      highlight.className = `pcr-highlight pcr-highlight-${comment_type}`;
+      highlight.dataset.noteId = id;
+      highlight.style.left = `${rect.left - pageRect.left}px`;
+      highlight.style.top = `${rect.top - pageRect.top}px`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      highlightLayer.appendChild(highlight);
+    }
+
+    // Tag text spans in the range with note IDs for click detection
+    for (let i = startSpanIndex; i <= endSpanIndex; i++) {
+      const span = textLayer.querySelector(`span[data-index="${i}"]`);
+      if (span) {
+        const existing = span.dataset.noteIds || '';
+        const ids = existing ? existing.split(',') : [];
+        if (!ids.includes(id)) ids.push(id);
+        span.dataset.noteIds = ids.join(',');
+      }
+    }
+  } catch (err) {
+    console.log('PDF Converser: Could not render highlight for note', id, err.message);
+  }
+}
+
+function scrollToAndFlashHighlight(noteId) {
+  // Find the note in cache to get page number
+  const note = cachedNotes.find(n => n.id === noteId);
+  if (!note) return;
+
+  const page = document.querySelector(`.pdf-page[data-page-number="${note.page_number}"]`);
+  if (page) {
+    page.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // Flash the highlight after scroll
+  setTimeout(() => {
+    const highlights = document.querySelectorAll(`.pcr-highlight[data-note-id="${noteId}"]`);
+    highlights.forEach(el => {
+      el.classList.add('pcr-highlight-flash');
+      el.addEventListener('animationend', () => el.classList.remove('pcr-highlight-flash'), { once: true });
+    });
+  }, 400);
 }
 
 // === Toast Notifications ===
@@ -348,6 +535,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       pdfIdentifier: getPdfIdentifier(),
       pdfTitle: getPdfTitle(),
     });
+  }
+  if (message.action === 'scrollToHighlight') {
+    scrollToAndFlashHighlight(message.noteId);
   }
 });
 

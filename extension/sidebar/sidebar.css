@@ -119,6 +119,17 @@ body {
 
 .note-card:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+}
+
+.note-flash {
+  animation: note-flash-anim 0.8s ease;
+}
+
+@keyframes note-flash-anim {
+  0%   { background: #e3f2fd; }
+  50%  { background: #bbdefb; }
+  100% { background: white; }
 }
 
 .note-meta {

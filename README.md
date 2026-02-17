@@ -68,6 +68,8 @@ NOTES_DIR=./notes                  # Where annotation JSON files are stored
 3. **Voice**: Click the microphone button, speak your annotation, and click **Done**. Your speech is transcribed via Whisper, cleaned by the LLM, and saved.
 4. **Text**: Click the text button, type your annotation, and press **Submit** (or Ctrl+Enter). By default, your text is cleaned up by the LLM — uncheck "Clean up with LLM" to save it as-is.
 
+Annotated text is highlighted in the PDF with colors matching the comment type. Click a highlight to jump to that annotation in the side panel. Click an annotation in the side panel to scroll the PDF to the highlighted passage.
+
 ### Viewing Annotations
 
 Click the PDF Converser extension icon and select **Open Notes Panel** to open the side panel. Annotations can be viewed in four modes:
@@ -144,9 +146,6 @@ Extract and store the full PDF text (page-by-page, via PDF.js `getTextContent()`
 - **Auto-generated paper summary**: Produce a structured summary of the paper to provide context alongside your annotations in exports.
 
 **Implementation sketch**: The viewer already has access to all page text content via PDF.js. On PDF load, extract all text page-by-page and send it to a backend endpoint that stores it alongside the note file (or within it). The cleanup prompt and organize prompts can then include relevant document context. For longer papers, a chunking/retrieval strategy (e.g., embedding-based search over page chunks) would keep token usage manageable.
-
-### Inline Highlights with Bidirectional Linking
-Render persistent highlights on annotated text in the PDF viewer (color-coded by comment type). Link highlights and the note panel bidirectionally: clicking a highlight in the PDF scrolls the side panel to that annotation, and clicking an annotation in the side panel scrolls the PDF viewer to the highlighted passage. This would require storing the text range/position for each annotation and rendering highlight overlays on the text layer.
 
 ### Review-Oriented Export
 Add export templates tailored to specific workflows:

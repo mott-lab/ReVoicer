@@ -76,6 +76,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'openSidePanel') {
     chrome.sidePanel.open({ tabId: sender.tab.id });
   }
+
+  // Bidirectional linking: relay scrollToNote from content script to sidebar
+  if (message.action === 'scrollToNote') {
+    chrome.runtime.sendMessage(message).catch(() => {});
+  }
+
+  // Bidirectional linking: relay scrollToHighlight from sidebar to content script
+  if (message.action === 'scrollToHighlight') {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, message).catch(() => {});
+      }
+    });
+  }
 });
 
 // === Tab Switch Detection ===

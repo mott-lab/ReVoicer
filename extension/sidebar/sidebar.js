@@ -19,10 +19,13 @@ async function init() {
     }
   });
 
-  // Listen for new notes and tab switches
+  // Listen for new notes, tab switches, and scroll-to-note requests
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'noteCreated' && msg.pdfIdentifier === currentPdfId) {
       loadNotes();
+    }
+    if (msg.action === 'scrollToNote') {
+      scrollToAndFlashNote(msg.noteId);
     }
     if (msg.action === 'tabChanged') {
       const newId = msg.pdfIdentifier;
@@ -128,6 +131,8 @@ function renderNotesList(notes, container) {
       }
     });
   });
+
+  attachNoteCardClickHandlers(container);
 }
 
 function renderNotesByType(notes, container) {
@@ -170,6 +175,34 @@ function renderGroupedNotes(groups, container) {
       `).join('')}
     </div>
   `).join('');
+
+  attachNoteCardClickHandlers(container);
+}
+
+function scrollToAndFlashNote(noteId) {
+  const card = document.querySelector(`.note-card[data-id="${noteId}"]`);
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.add('note-flash');
+  card.addEventListener('animationend', () => card.classList.remove('note-flash'), { once: true });
+}
+
+function attachNoteCardClickHandlers(container) {
+  container.querySelectorAll('.note-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      // Don't trigger on button clicks or details toggle
+      if (e.target.closest('.note-actions') || e.target.closest('.note-raw')) return;
+      const noteId = card.dataset.id;
+      const pageSpan = card.querySelector('.note-page');
+      const pageMatch = pageSpan?.textContent?.match(/\d+/);
+      const pageNumber = pageMatch ? parseInt(pageMatch[0], 10) : 0;
+      chrome.runtime.sendMessage({
+        action: 'scrollToHighlight',
+        noteId,
+        pageNumber,
+      }).catch(() => {});
+    });
+  });
 }
 
 async function exportMarkdown() {

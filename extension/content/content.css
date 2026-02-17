@@ -239,3 +239,46 @@
 .pcr-toast-fade {
   opacity: 0;
 }
+
+/* === Inline Highlights === */
+
+.pcr-highlight-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.pcr-highlight {
+  position: absolute;
+  opacity: 0.3;
+  border-radius: 2px;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.pcr-highlight-summary     { background: #42a5f5; }
+.pcr-highlight-critique    { background: #ef5350; }
+.pcr-highlight-strength    { background: #66bb6a; }
+.pcr-highlight-question    { background: #ffa726; }
+.pcr-highlight-related_work { background: #ab47bc; }
+.pcr-highlight-suggestion  { background: #26a69a; }
+.pcr-highlight-follow_up   { background: #ffee58; }
+
+.pcr-highlight-flash {
+  animation: pcr-flash-anim 0.8s ease;
+}
+
+@keyframes pcr-flash-anim {
+  0%   { opacity: 0.7; }
+  50%  { opacity: 0.15; }
+  100% { opacity: 0.3; }
+}
+
+/* Make annotated text spans clickable */
+.text-layer span[data-note-ids] {
+  cursor: pointer;
+}

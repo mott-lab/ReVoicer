@@ -30,6 +30,7 @@ async def create_note(note_in: NoteCreate):
         raw_transcript=note_in.raw_transcript,
         cleaned_comment=cleaned,
         comment_type=comment_type,
+        highlight_data=note_in.highlight_data,
     )
     return note
 
