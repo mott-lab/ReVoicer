@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 from app.prompts.qa import QA_PROMPT
-from app.schemas import QARequest, QAResponse
+from app.schemas import QAListResponse, QARequest, QAResponse
 from app.services.document_store import get_document_store
 from app.services.llm_service import get_llm
+from app.services.qa_store import get_qa_store
 
 router = APIRouter()
 
@@ -37,4 +38,40 @@ async def ask_question(body: QARequest):
         "question_with_context": question_with_context,
     })
 
-    return QAResponse(answer=result.content)
+    # Persist the Q&A pair
+    qa_store = get_qa_store()
+    entry = await qa_store.create_entry(
+        content_hash=body.pdf_identifier,
+        question=body.question,
+        answer=result.content,
+        selected_text=body.selected_text,
+        page_number=body.page_number,
+    )
+
+    return QAResponse(
+        id=entry["id"],
+        question=entry["question"],
+        answer=entry["answer"],
+        selected_text=entry["selected_text"],
+        page_number=entry["page_number"],
+        created_at=entry["created_at"],
+    )
+
+
+@router.get("/", response_model=QAListResponse)
+async def list_questions(pdf_identifier: str):
+    qa_store = get_qa_store()
+    entries = await qa_store.list_entries(pdf_identifier)
+    return QAListResponse(
+        entries=entries,
+        total=len(entries),
+    )
+
+
+@router.delete("/{entry_id}", status_code=204)
+async def delete_question(entry_id: str, pdf_identifier: str):
+    qa_store = get_qa_store()
+    deleted = await qa_store.delete_entry(pdf_identifier, entry_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Q&A entry not found")
+    return Response(status_code=204)

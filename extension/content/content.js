@@ -322,11 +322,18 @@ async function submitQuestion(selectedText, question) {
     return;
   }
 
+  const pageNum = getCurrentPageNumber();
   showAnswerOverlay(question, null, true);
 
   try {
-    const result = await apiClient.askQuestion(pdfId, question, selectedText);
+    const result = await apiClient.askQuestion(pdfId, question, selectedText, pageNum);
     showAnswerOverlay(question, result.answer, false);
+
+    // Notify sidebar to refresh questions list
+    chrome.runtime.sendMessage({
+      action: 'questionAnswered',
+      pdfIdentifier: pdfId,
+    }).catch(() => {});
   } catch (err) {
     console.error('PDF Converser - Q&A error:', err);
     showAnswerOverlay(question, 'Failed to get answer. Is the backend running?', false, true);

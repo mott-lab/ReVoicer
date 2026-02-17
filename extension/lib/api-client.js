@@ -95,7 +95,7 @@ class ApiClient {
     return resp.json();
   }
 
-  async askQuestion(pdfIdentifier, question, selectedText) {
+  async askQuestion(pdfIdentifier, question, selectedText, pageNumber = 0) {
     const resp = await fetch(`${this.baseUrl}/qa/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,6 +103,7 @@ class ApiClient {
         pdf_identifier: pdfIdentifier,
         question,
         selected_text: selectedText || null,
+        page_number: pageNumber,
       }),
     });
     if (!resp.ok) {
@@ -110,6 +111,19 @@ class ApiClient {
       throw new Error(`API error ${resp.status}: ${text}`);
     }
     return resp.json();
+  }
+
+  async getQuestions(pdfIdentifier) {
+    const params = new URLSearchParams({ pdf_identifier: pdfIdentifier });
+    const resp = await fetch(`${this.baseUrl}/qa/?${params}`);
+    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+    return resp.json();
+  }
+
+  async deleteQuestion(entryId, pdfIdentifier) {
+    const params = new URLSearchParams({ pdf_identifier: pdfIdentifier });
+    const resp = await fetch(`${this.baseUrl}/qa/${entryId}?${params}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
   }
 
   async checkHealth() {

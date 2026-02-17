@@ -18,24 +18,44 @@ body {
   padding: 12px;
 }
 
-/* Header */
-.sidebar-header {
-  margin-bottom: 12px;
-}
-
-.sidebar-header h1 {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1a1a1a;
-  margin-bottom: 2px;
-}
-
+/* PDF Title */
 .pdf-title {
   font-size: 12px;
   color: #888;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  margin-bottom: 8px;
+}
+
+/* Tab Bar */
+.tab-bar {
+  display: flex;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  background: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #666;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tab-btn:hover {
+  background: #f0f0f0;
+}
+
+.tab-btn.active {
+  background: #4285f4;
+  color: white;
 }
 
 /* Toolbar */
@@ -245,4 +265,85 @@ body {
   padding: 6px 0;
   border-bottom: 2px solid #4285f4;
   margin-bottom: 8px;
+}
+
+/* Q&A Cards */
+.qa-card {
+  background: white;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  transition: box-shadow 0.15s;
+}
+
+.qa-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+}
+
+.qa-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #999;
+}
+
+.qa-page {
+  font-weight: 600;
+  color: #4285f4;
+}
+
+.qa-question {
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.qa-answer {
+  font-size: 13px;
+  color: #333;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.qa-context {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #ffa726;
+  background: #fff8f0;
+  font-size: 12px;
+  color: #555;
+  font-style: italic;
+  max-height: 80px;
+  overflow: hidden;
+}
+
+.qa-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.qa-actions button {
+  padding: 3px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  font-size: 11px;
+  cursor: pointer;
+  color: #666;
+  transition: background 0.15s;
+}
+
+.qa-actions button:hover {
+  background: #f0f0f0;
+}
+
+.qa-delete:hover {
+  border-color: #c62828;
+  color: #c62828 !important;
 }

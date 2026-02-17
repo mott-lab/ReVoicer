@@ -53,7 +53,18 @@ class QARequest(BaseModel):
     pdf_identifier: str
     question: str
     selected_text: str | None = None
+    page_number: int = 0
 
 
 class QAResponse(BaseModel):
+    id: str
+    question: str
     answer: str
+    selected_text: str | None = None
+    page_number: int
+    created_at: datetime
+
+
+class QAListResponse(BaseModel):
+    entries: list[QAResponse]
+    total: int

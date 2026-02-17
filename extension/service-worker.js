@@ -46,6 +46,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
 
+  if (message.action === 'questionAnswered') {
+    chrome.runtime.sendMessage(message).catch(() => {});
+  }
+
   if (message.action === 'getCurrentPdfId') {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]) {

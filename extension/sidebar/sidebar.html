@@ -8,12 +8,14 @@
 </head>
 <body>
   <div id="app">
-    <header class="sidebar-header">
-      <h1>PDF Converser</h1>
-      <div id="pdf-title" class="pdf-title">No PDF detected</div>
-    </header>
+    <div id="pdf-title" class="pdf-title">No PDF detected</div>
 
-    <div class="toolbar">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="notes">Notes</button>
+      <button class="tab-btn" data-tab="questions">Questions</button>
+    </div>
+
+    <div id="notes-toolbar" class="toolbar">
       <select id="view-mode">
         <option value="chronological">By Page Order</option>
         <option value="by-type">By Type</option>
@@ -21,6 +23,13 @@
         <option value="by-theme">By Theme</option>
       </select>
       <button id="export-btn" class="toolbar-btn" title="Export as Markdown">Export MD</button>
+    </div>
+
+    <div id="questions-toolbar" class="toolbar" style="display: none;">
+      <select id="questions-sort">
+        <option value="date">By Ask Date</option>
+        <option value="page">By Page Order</option>
+      </select>
     </div>
 
     <div id="loading" class="loading" style="display: none;">
@@ -31,6 +40,7 @@
     <div id="notes-container">
       <p class="empty-state">No annotations yet. Highlight text in a PDF and click the microphone button to begin.</p>
     </div>
+    <div id="questions-container" style="display: none;"></div>
   </div>
   <script src="../lib/api-client.js"></script>
   <script src="sidebar.js"></script>

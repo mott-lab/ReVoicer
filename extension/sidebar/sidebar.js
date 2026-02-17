@@ -2,6 +2,7 @@
 
 const api = new ApiClient();
 let currentPdfId = null;
+let currentTab = 'notes';
 
 async function init() {
   await api.init();
@@ -19,10 +20,13 @@ async function init() {
     }
   });
 
-  // Listen for new notes, tab switches, and scroll-to-note requests
+  // Listen for new notes, Q&A answers, tab switches, and scroll-to-note requests
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.action === 'noteCreated' && msg.pdfIdentifier === currentPdfId) {
-      loadNotes();
+      if (currentTab === 'notes') loadNotes();
+    }
+    if (msg.action === 'questionAnswered' && msg.pdfIdentifier === currentPdfId) {
+      if (currentTab === 'questions') loadQuestions();
     }
     if (msg.action === 'scrollToNote') {
       scrollToAndFlashNote(msg.noteId);
@@ -33,27 +37,71 @@ async function init() {
         currentPdfId = newId;
         document.getElementById('pdf-title').textContent = msg.pdfTitle || 'Untitled PDF';
         document.getElementById('view-mode').value = 'chronological';
-        loadNotes();
+        document.getElementById('questions-sort').value = 'date';
+        if (currentTab === 'notes') loadNotes();
+        else loadQuestions();
       } else if (!newId) {
         currentPdfId = null;
         document.getElementById('pdf-title').textContent = 'No PDF open';
         document.getElementById('notes-container').innerHTML =
           '<p class="empty-state">Open a PDF to see annotations.</p>';
+        document.getElementById('questions-container').innerHTML =
+          '<p class="empty-state">Open a PDF to see questions.</p>';
       }
     }
   });
 
-  // View mode switching
+  // Tab switching
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // View mode switching (notes)
   document.getElementById('view-mode').addEventListener('change', (e) => {
     loadNotes(e.target.value);
+  });
+
+  // Sort switching (questions)
+  document.getElementById('questions-sort').addEventListener('change', (e) => {
+    loadQuestions(e.target.value);
   });
 
   // Export button
   document.getElementById('export-btn').addEventListener('click', exportMarkdown);
 }
 
-async function loadNotes(viewMode = 'chronological') {
+function switchTab(tab) {
+  currentTab = tab;
+
+  // Update active tab button
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  // Show/hide toolbars and containers
+  const notesToolbar = document.getElementById('notes-toolbar');
+  const questionsToolbar = document.getElementById('questions-toolbar');
+  const notesContainer = document.getElementById('notes-container');
+  const questionsContainer = document.getElementById('questions-container');
+
+  if (tab === 'notes') {
+    notesToolbar.style.display = 'flex';
+    questionsToolbar.style.display = 'none';
+    notesContainer.style.display = '';
+    questionsContainer.style.display = 'none';
+    loadNotes();
+  } else {
+    notesToolbar.style.display = 'none';
+    questionsToolbar.style.display = 'flex';
+    notesContainer.style.display = 'none';
+    questionsContainer.style.display = '';
+    loadQuestions();
+  }
+}
+
+async function loadNotes(viewMode = null) {
   if (!currentPdfId) return;
+  viewMode = viewMode || document.getElementById('view-mode').value;
 
   const container = document.getElementById('notes-container');
   const loading = document.getElementById('loading');
@@ -79,6 +127,83 @@ async function loadNotes(viewMode = 'chronological') {
   } finally {
     loading.style.display = 'none';
   }
+}
+
+async function loadQuestions(sortMode = null) {
+  if (!currentPdfId) return;
+  sortMode = sortMode || document.getElementById('questions-sort').value;
+
+  const container = document.getElementById('questions-container');
+  const loading = document.getElementById('loading');
+  loading.style.display = 'flex';
+
+  try {
+    const data = await api.getQuestions(currentPdfId);
+    let entries = data.entries || [];
+
+    // Sort client-side
+    if (sortMode === 'page') {
+      entries.sort((a, b) => (a.page_number || 0) - (b.page_number || 0) || a.created_at.localeCompare(b.created_at));
+    } else {
+      // 'date' — newest first
+      entries.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    }
+
+    renderQuestionsList(entries, container);
+  } catch (err) {
+    container.innerHTML = `<p class="error-state">Failed to load questions. Is the backend running?</p>`;
+    console.error('PDF Converser sidebar error:', err);
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+function renderQuestionsList(entries, container) {
+  if (!entries || entries.length === 0) {
+    container.innerHTML = '<p class="empty-state">No questions yet. Highlight text and click Ask to get started.</p>';
+    return;
+  }
+
+  container.innerHTML = entries.map(entry => `
+    <div class="qa-card" data-id="${entry.id}" data-page="${entry.page_number || 0}">
+      <div class="qa-meta">
+        <span class="qa-page">${entry.page_number ? 'Page ' + entry.page_number : ''}</span>
+        <span class="qa-time">${formatTime(entry.created_at)}</span>
+      </div>
+      <div class="qa-question">${escapeHtml(entry.question)}</div>
+      <div class="qa-answer">${escapeHtml(entry.answer)}</div>
+      ${entry.selected_text ? '<blockquote class="qa-context">' + escapeHtml(entry.selected_text) + '</blockquote>' : ''}
+      <div class="qa-actions">
+        <button class="qa-delete" data-id="${entry.id}" title="Delete this question">Delete</button>
+      </div>
+    </div>
+  `).join('');
+
+  // Delete handlers
+  container.querySelectorAll('.qa-delete').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm('Delete this question?')) {
+        await api.deleteQuestion(btn.dataset.id, currentPdfId);
+        loadQuestions();
+      }
+    });
+  });
+
+  // Card click — scroll PDF to that page
+  container.querySelectorAll('.qa-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.qa-actions')) return;
+      const pageNumber = parseInt(card.dataset.page, 10) || 0;
+      if (pageNumber > 0) {
+        chrome.runtime.sendMessage({
+          action: 'scrollToHighlight',
+          noteId: null,
+          pageNumber,
+        }).catch(() => {});
+      }
+    });
+  });
 }
 
 function renderNotesList(notes, container) {
