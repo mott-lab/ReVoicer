@@ -29,12 +29,18 @@ function getPdfIdentifier() {
 /**
  * Attempt to detect the current page number from the DOM.
  * Works with Google Scholar PDF Reader and PDF.js-based viewers.
+ *
+ * Pass a Range to derive the page from a cached selection — needed when the
+ * live selection has moved (e.g. user has focused a textarea overlay).
  */
-function getCurrentPageNumber() {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) return 0;
+function getCurrentPageNumber(rangeOverride = null) {
+  let range = rangeOverride;
+  if (!range) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return 0;
+    range = selection.getRangeAt(0);
+  }
 
-  const range = selection.getRangeAt(0);
   const node = range.startContainer;
   const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
 

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Converser</title>
+
+  <!-- Both panes' stylesheets. sidebar.css is loaded after viewer.css so its
+       `body` rule wins for the right pane's typography (the layout overrides
+       below pull viewer-specific positioning back into the left pane). -->
+  <link rel="stylesheet" href="../extension/viewer/viewer.css">
+  <link rel="stylesheet" href="../extension/content/content.css">
+  <link rel="stylesheet" href="../extension/sidebar/sidebar.css">
+
+  <style>
+    /* Split-pane layout overrides. The viewer.css and sidebar.css were each
+       written assuming they own the whole viewport; here we shoebox them
+       into two side-by-side panes. */
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      margin: 0;
+      overflow: hidden;
+      background: #525659;
+    }
+    #pdf-pane {
+      flex: 1;
+      position: relative;
+      min-width: 0;       /* allow shrinking when sidebar is wide */
+      background: #525659;
+      overflow: hidden;
+    }
+    /* viewer.css positions #toolbar/#viewer-container with `fixed` (full
+       viewport). Re-anchor them to #pdf-pane via `absolute`. */
+    #pdf-pane > #toolbar { position: absolute; }
+    #pdf-pane > #viewer-container { position: absolute; }
+    #sidebar-pane {
+      width: 380px;
+      flex: 0 0 380px;
+      background: #fafafa;
+      color: #333;
+      font-size: 13px;
+      border-left: 1px solid #ccc;
+      overflow-y: auto;
+    }
+    /* The split-pane sidebar is a column inside the window, not the whole
+       page, so reset margins/paddings the original CSS gave to the
+       full-window sidebar body. */
+    #sidebar-pane #app { padding: 12px; }
+
+    /* When speech_provider is 'off', hide the voice-annotation button on
+       the floating action bar. The text-annotation button remains. */
+    .speech-off #pcr-fab-mic { display: none !important; }
+  </style>
+</head>
+<body>
+  <!-- ─── Left pane: PDF viewer ─────────────────────────────────────────── -->
+  <div id="pdf-pane">
+    <div id="toolbar">
+      <button id="prev-page" title="Previous page">&larr;</button>
+      <span id="page-info">Page <input id="page-input" type="number" min="1" value="1"> of <span id="page-count">-</span></span>
+      <button id="next-page" title="Next page">&rarr;</button>
+      <span class="separator"></span>
+      <button id="zoom-out" title="Zoom out">&minus;</button>
+      <span id="zoom-level">100%</span>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="zoom-fit" title="Fit to width">Fit</button>
+      <!-- viewer.css's `#pdf-title` element is intentionally omitted here
+           because the sidebar pane already shows the document title and the
+           two would share an id. viewer.js's `getElementById('pdf-title')`
+           still resolves — to the sidebar copy. -->
+    </div>
+    <div id="viewer-container">
+      <div id="pages"></div>
+    </div>
+  </div>
+
+  <!-- ─── Right pane: notes / Q&A sidebar ───────────────────────────────── -->
+  <aside id="sidebar-pane">
+    <div id="app">
+      <div id="pdf-title" class="pdf-title">No PDF detected</div>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="notes">Notes</button>
+        <button class="tab-btn" data-tab="questions">Questions</button>
+      </div>
+
+      <div id="notes-toolbar" class="toolbar">
+        <select id="view-mode">
+          <option value="chronological">By Page Order</option>
+          <option value="by-type">By Type</option>
+          <option value="by-section">By Section</option>
+          <option value="by-theme">By Theme</option>
+        </select>
+        <button id="export-btn" class="toolbar-btn" title="Export as Markdown">Export MD</button>
+      </div>
+
+      <div id="questions-toolbar" class="toolbar" style="display: none;">
+        <select id="questions-sort">
+          <option value="date">By Ask Date</option>
+          <option value="page">By Page Order</option>
+        </select>
+      </div>
+
+      <div id="loading" class="loading" style="display: none;">
+        <div class="spinner"></div>
+        <span>Loading...</span>
+      </div>
+
+      <div id="notes-container">
+        <p class="empty-state">No annotations yet. Highlight text in the PDF and click the microphone button to begin.</p>
+      </div>
+      <div id="questions-container" style="display: none;"></div>
+    </div>
+  </aside>
+
+  <!-- Script load order matters: viewer.js (module) provides pdfjs and
+       drives rendering; the lib scripts define the API client and helpers;
+       content.js wires up selection/recording on the PDF; sidebar.js drives
+       the right pane and shares an ApiClient instance via its own copy. -->
+  <script type="module" src="../extension/viewer/viewer.js"></script>
+  <script src="../extension/lib/pdf-identifier.js"></script>
+  <script src="../extension/lib/speech.js"></script>
+  <script src="../extension/lib/api-client.js"></script>
+  <script src="../extension/content/content.js"></script>
+  <script src="../extension/sidebar/sidebar.js"></script>
+  <!-- Local Whisper runtime exposes window.__localWhisper.transcribe(blob).
+       Lazy-loads the model on first use; preload.js routes here when
+       speech_provider === 'local_whisper'. -->
+  <script type="module" src="./services/local-whisper-runtime.js"></script>
+  <!-- Vosk runtime exposes window.__voskRecognition (a SpeechRecognition-
+       shaped class). speech.js prefers this in the desktop build to stream
+       partial transcripts in real time, since Electron's
+       webkitSpeechRecognition is a no-op. -->
+  <script type="module" src="./services/vosk-runtime.js"></script>
+</body>
+</html>

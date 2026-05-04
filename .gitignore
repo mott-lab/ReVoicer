@@ -18,6 +18,11 @@ venv/
 .env
 backend/.env
 
+# Node / Electron
+node_modules/
+desktop/dist/
+desktop/out/
+
 # IDE
 .vscode/
 .idea/
@@ -37,3 +42,6 @@ review-examples/
 
 # Claude
 .claude/
+
+reviews/
+pdf-converser.code-workspace

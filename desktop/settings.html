@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Converser — Settings</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #1e1e1e; color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px; }
+    .wrap { padding: 20px 24px; max-width: 600px; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
+
+    fieldset { border: 1px solid #333; border-radius: 6px; padding: 12px 16px;
+      margin: 0 0 14px; }
+    legend { padding: 0 6px; color: #aaa; font-size: 12px; font-weight: 600;
+      letter-spacing: 0.5px; text-transform: uppercase; }
+
+    label { display: block; font-size: 12px; color: #aaa; margin: 8px 0 4px; }
+    input[type=text], input[type=password], select {
+      width: 100%; box-sizing: border-box; background: #2a2a2a;
+      color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
+      padding: 6px 8px; font-size: 13px; font-family: inherit; }
+    input:focus, select:focus { outline: none; border-color: #2d7ff9; }
+
+    /* Provider radio bar — single row of pills */
+    .provider-bar { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+    .provider-bar label {
+      flex: 1 1 auto; min-width: 0;
+      margin: 0; padding: 6px 10px;
+      background: #2a2a2a; border: 1px solid #444; border-radius: 4px;
+      color: #ccc; font-size: 12px; cursor: pointer; text-align: center;
+      user-select: none;
+    }
+    .provider-bar label:hover { background: #333; }
+    .provider-bar input[type=radio] { display: none; }
+    .provider-bar input[type=radio]:checked + span { color: #fff; }
+    .provider-bar label:has(input:checked) {
+      background: #1e3a5f; border-color: #2d7ff9; color: #fff;
+    }
+
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; min-width: 0; }
+
+    .help { font-size: 11px; color: #888; margin-top: 4px; line-height: 1.4; }
+
+    .test-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    .test-row button { flex: 0 0 auto; }
+    .test-result { font-size: 11px; flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .test-result.ok { color: #7fc97f; }
+    .test-result.err { color: #f97f7f; }
+
+    .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; }
+    .toggle input { width: auto; }
+    .toggle-label { font-size: 13px; color: #ddd; }
+
+    .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    button {
+      background: #2d7ff9; color: white; border: 0; padding: 7px 14px;
+      border-radius: 4px; font-size: 13px; cursor: pointer;
+      font-family: inherit;
+    }
+    button.secondary { background: #444; }
+    button.small { padding: 4px 10px; font-size: 12px; background: #3a3a3a; }
+    button:hover { filter: brightness(1.15); }
+    button:disabled { opacity: 0.5; cursor: default; }
+
+    .status { font-size: 12px; color: #7fc97f; margin-top: 8px; min-height: 18px; }
+    .status.error { color: #f97f7f; }
+
+    /* Hide all provider-specific blocks; the active class makes one visible. */
+    .provider-block { display: none; margin-top: 10px; }
+    .provider-block.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Settings</h1>
+
+    <!-- ── Text section: cleanup, organize, Q&A ───────────────────────── -->
+    <fieldset>
+      <legend>Text Processing</legend>
+
+      <label class="toggle">
+        <input type="checkbox" id="cleanup_enabled">
+        <span class="toggle-label">Use LLM to clean up and classify annotations</span>
+      </label>
+      <div class="help">When off, typed/voice annotations are saved verbatim with a heuristic type label. Q&amp;A and Organize still need a provider.</div>
+
+      <label>Provider</label>
+      <div class="provider-bar">
+        <label><input type="radio" name="text_provider" value="openai"><span>OpenAI</span></label>
+        <label><input type="radio" name="text_provider" value="anthropic"><span>Anthropic</span></label>
+        <label><input type="radio" name="text_provider" value="ollama"><span>Ollama</span></label>
+        <label><input type="radio" name="text_provider" value="openai_compat"><span>OpenAI-compat</span></label>
+      </div>
+
+      <!-- OpenAI -->
+      <div class="provider-block" data-provider="openai">
+        <label>API Key</label>
+        <input id="openai_api_key" type="password" placeholder="sk-...">
+        <label>Model</label>
+        <input id="openai_model" type="text" placeholder="gpt-4o-mini">
+        <label>Base URL <span style="color:#666">(optional)</span></label>
+        <input id="openai_base_url" type="text" placeholder="https://api.openai.com/v1">
+        <div class="test-row">
+          <button class="small" data-test="openai">Test connection</button>
+          <span class="test-result" id="test_openai"></span>
+        </div>
+      </div>
+
+      <!-- Anthropic -->
+      <div class="provider-block" data-provider="anthropic">
+        <label>API Key</label>
+        <input id="anthropic_api_key" type="password" placeholder="sk-ant-...">
+        <label>Model</label>
+        <input id="anthropic_model" type="text" placeholder="claude-haiku-4-5-20251001">
+        <div class="test-row">
+          <button class="small" data-test="anthropic">Test connection</button>
+          <span class="test-result" id="test_anthropic"></span>
+        </div>
+      </div>
+
+      <!-- Ollama -->
+      <div class="provider-block" data-provider="ollama">
+        <div class="row">
+          <div>
+            <label>Base URL</label>
+            <input id="ollama_base_url" type="text" placeholder="http://localhost:11434">
+          </div>
+          <div>
+            <label>Model</label>
+            <select id="ollama_model_select" style="display:none;"></select>
+            <input id="ollama_model" type="text" placeholder="llama3.2">
+          </div>
+        </div>
+        <div class="test-row">
+          <button class="small" data-test="ollama">Test &amp; list models</button>
+          <span class="test-result" id="test_ollama"></span>
+        </div>
+        <div class="help">Local-only, no API key required. The Test button populates a model dropdown from your installed models.</div>
+      </div>
+
+      <!-- OpenAI-compatible -->
+      <div class="provider-block" data-provider="openai_compat">
+        <label>Base URL</label>
+        <input id="openai_compat_base_url" type="text" placeholder="https://api.groq.com/openai/v1">
+        <div class="row">
+          <div>
+            <label>API Key</label>
+            <input id="openai_compat_api_key" type="password" placeholder="(optional for some local servers)">
+          </div>
+          <div>
+            <label>Model</label>
+            <input id="openai_compat_model" type="text" placeholder="llama-3.1-70b-versatile">
+          </div>
+        </div>
+        <div class="test-row">
+          <button class="small" data-test="openai_compat">Test connection</button>
+          <span class="test-result" id="test_openai_compat"></span>
+        </div>
+        <div class="help">For Groq, OpenRouter, Together, LM Studio, vLLM, llama.cpp server, etc. Anything that speaks the OpenAI chat-completions protocol.</div>
+      </div>
+    </fieldset>
+
+    <!-- ── Speech section ─────────────────────────────────────────────── -->
+    <fieldset>
+      <legend>Speech-to-Text</legend>
+      <label>Mode</label>
+      <div class="provider-bar">
+        <label><input type="radio" name="speech_provider" value="openai_whisper"><span>OpenAI Whisper</span></label>
+        <label><input type="radio" name="speech_provider" value="local_whisper"><span>Local Whisper</span></label>
+        <label><input type="radio" name="speech_provider" value="off"><span>Off</span></label>
+      </div>
+      <div class="help" id="speech_help"></div>
+    </fieldset>
+
+    <div class="actions">
+      <button class="secondary" id="cancel">Close</button>
+      <button id="save">Save</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const status = $('status');
+
+    function syncTextProviderBlocks() {
+      const provider = document.querySelector('input[name=text_provider]:checked')?.value;
+      document.querySelectorAll('.provider-block').forEach((el) => {
+        el.classList.toggle('active', el.dataset.provider === provider);
+      });
+    }
+
+    function syncSpeechHelp() {
+      const v = document.querySelector('input[name=speech_provider]:checked')?.value;
+      const help = $('speech_help');
+      if (v === 'openai_whisper') {
+        help.textContent = 'Records audio and transcribes via OpenAI Whisper. Requires the OpenAI API key in the Text section above.';
+      } else if (v === 'local_whisper') {
+        help.textContent = 'Runs Whisper locally inside the app via WebAssembly. ~75MB model downloaded on first use, then cached. No audio leaves your machine, no API key required.';
+      } else if (v === 'off') {
+        help.textContent = 'Voice annotations disabled — the microphone button is hidden. You can still create typed annotations.';
+      } else {
+        help.textContent = '';
+      }
+    }
+
+    document.querySelectorAll('input[name=text_provider]').forEach((r) => {
+      r.addEventListener('change', syncTextProviderBlocks);
+    });
+    document.querySelectorAll('input[name=speech_provider]').forEach((r) => {
+      r.addEventListener('change', syncSpeechHelp);
+    });
+
+    function readForm() {
+      return {
+        text_provider: document.querySelector('input[name=text_provider]:checked').value,
+        speech_provider: document.querySelector('input[name=speech_provider]:checked').value,
+        cleanup_enabled: $('cleanup_enabled').checked,
+
+        openai_api_key: $('openai_api_key').value.trim(),
+        openai_model: $('openai_model').value.trim() || 'gpt-4o-mini',
+        openai_base_url: $('openai_base_url').value.trim(),
+
+        anthropic_api_key: $('anthropic_api_key').value.trim(),
+        anthropic_model: $('anthropic_model').value.trim() || 'claude-haiku-4-5-20251001',
+
+        ollama_base_url: $('ollama_base_url').value.trim() || 'http://localhost:11434',
+        ollama_model: $('ollama_model').value.trim() || 'llama3.2',
+
+        openai_compat_base_url: $('openai_compat_base_url').value.trim(),
+        openai_compat_api_key: $('openai_compat_api_key').value.trim(),
+        openai_compat_model: $('openai_compat_model').value.trim(),
+      };
+    }
+
+    async function load() {
+      const s = await window.desktop.getSettings();
+      $('cleanup_enabled').checked = s.cleanup_enabled !== false;
+
+      document.querySelector(`input[name=text_provider][value="${s.text_provider}"]`)?.click();
+      document.querySelector(`input[name=speech_provider][value="${s.speech_provider}"]`)?.click();
+
+      $('openai_api_key').value = s.openai_api_key || '';
+      $('openai_model').value = s.openai_model || '';
+      $('openai_base_url').value = s.openai_base_url || '';
+      $('anthropic_api_key').value = s.anthropic_api_key || '';
+      $('anthropic_model').value = s.anthropic_model || '';
+      $('ollama_base_url').value = s.ollama_base_url || '';
+      $('ollama_model').value = s.ollama_model || '';
+      $('openai_compat_base_url').value = s.openai_compat_base_url || '';
+      $('openai_compat_api_key').value = s.openai_compat_api_key || '';
+      $('openai_compat_model').value = s.openai_compat_model || '';
+
+      syncTextProviderBlocks();
+      syncSpeechHelp();
+    }
+
+    function showResult(provider, result) {
+      const el = $(`test_${provider}`);
+      if (!el) return;
+      el.classList.remove('ok', 'err');
+      if (result.ok) {
+        el.classList.add('ok');
+        const ms = result.latencyMs ? ` · ${result.latencyMs}ms` : '';
+        el.textContent = `OK — ${result.message}${ms}`;
+      } else {
+        el.classList.add('err');
+        el.textContent = `Failed — ${result.message}`;
+      }
+    }
+
+    function maybePopulateOllamaModels(result) {
+      if (!result.ok || !Array.isArray(result.models) || result.models.length === 0) return;
+      const sel = $('ollama_model_select');
+      const input = $('ollama_model');
+      sel.innerHTML = '';
+      for (const m of result.models) {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        sel.appendChild(opt);
+      }
+      // Preselect the current value if it's in the list.
+      if (result.models.includes(input.value)) sel.value = input.value;
+      sel.style.display = '';
+      input.style.display = 'none';
+      sel.onchange = () => { input.value = sel.value; };
+    }
+
+    document.querySelectorAll('button[data-test]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const provider = btn.dataset.test;
+        btn.disabled = true;
+        const el = $(`test_${provider}`);
+        if (el) { el.classList.remove('ok', 'err'); el.textContent = 'Testing…'; }
+        try {
+          const result = await window.desktop.testConnection(provider, readForm());
+          showResult(provider, result);
+          if (provider === 'ollama') maybePopulateOllamaModels(result);
+        } catch (err) {
+          showResult(provider, { ok: false, message: err.message || String(err) });
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    $('save').addEventListener('click', async () => {
+      try {
+        await window.desktop.saveSettings(readForm());
+        status.textContent = 'Saved.';
+        status.classList.remove('error');
+      } catch (err) {
+        status.textContent = `Save failed: ${err.message || err}`;
+        status.classList.add('error');
+      }
+    });
+
+    $('cancel').addEventListener('click', () => window.close());
+
+    load();
+  </script>
+</body>
+</html>

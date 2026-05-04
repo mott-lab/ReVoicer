@@ -160,3 +160,20 @@ The full PDF text is now extracted and stored (page-by-page) on every PDF open, 
 Add export templates tailored to specific workflows:
 - **Review export**: Generate a structured review following a standard format (Summary, Strengths, Weaknesses with subsections). Use provided `review-examples/` as style/tone references so the generated review matches the user's writing voice.
 - **Notes export**: Organize annotations by topic/theme for personal reference. This partially exists in the current "By Theme" view and Markdown export, but a dedicated notes-oriented template could improve the output structure.
+
+### Review Rubric Upload & Coverage Check
+Allow users to upload review instructions/rubrics (e.g., a conference review form specifying categories like novelty, rigor, clarity, related work, reproducibility). This enables two features:
+- **Review coverage report**: Compare the user's existing annotations against the rubric's categories to identify gaps — which dimensions of the rubric have been addressed by annotations and which still need attention. Available as a dedicated button in the sidebar at any time.
+- **Export-time coverage check**: When the user has uploaded a rubric and clicks Export, automatically run the coverage check first and surface any under-addressed categories before exporting, so the reviewer can fill gaps before finalizing.
+- **Structured review generation**: Use the uploaded rubric to structure the generated review export — organizing the output by the rubric's categories rather than a generic format, so the export matches what the conference expects.
+
+## Issues to address
+
+- after you make a comment and click "Done", it spawns another annotation modal next to where the mouse was. it should only spawn this on highlight. probably can fix by just turning off the click / highlight detector on submit? idk.
+- the ui / modal appears in other web pages as well when text is highlighted; should be restrained to the PDFs.
+
+
+## Other ideas
+- rework the comment type deduction. maybe we can use tags instead, since comments often fall under multiple categories. would need to review the commen types that are there already and probably add some. these could also include what part of the paper they are in or about (methods, background etc.).
+- we can always default to yellow shade highlight but let the user change the color if they want, thru a simple color icon in the comment in the notes panel.
+- i think the "ask" feature is not so useful for this version right now. let's disable it for now, but keep the functionality in the codebase to revisit.

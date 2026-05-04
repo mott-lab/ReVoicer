@@ -322,7 +322,7 @@ async function submitQuestion(selectedText, question) {
     return;
   }
 
-  const pageNum = getCurrentPageNumber();
+  const pageNum = getCurrentPageNumber(currentSelectionRange);
   showAnswerOverlay(question, null, true);
 
   try {
@@ -405,7 +405,7 @@ function captureHighlightData() {
 
 async function submitNote(selectedText, rawTranscript, audioBlob) {
   const pdfId = getPdfIdentifier();
-  const pageNum = getCurrentPageNumber();
+  const pageNum = getCurrentPageNumber(currentSelectionRange);
   const pdfTitle = getPdfTitle();
   const highlightData = captureHighlightData();
 
@@ -464,7 +464,7 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
 
 async function submitTypedNote(selectedText, typedText, skipCleanup) {
   const pdfId = getPdfIdentifier();
-  const pageNum = getCurrentPageNumber();
+  const pageNum = getCurrentPageNumber(currentSelectionRange);
   const pdfTitle = getPdfTitle();
   const highlightData = captureHighlightData();
 

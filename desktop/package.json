@@ -1,0 +1,17 @@
+{
+  "name": "pdf-converser-desktop",
+  "version": "0.1.0",
+  "description": "PDF Converser desktop app (Electron)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "openai": "^4.70.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

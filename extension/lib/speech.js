@@ -42,8 +42,14 @@ class SpeechCapture {
       return;
     }
 
-    // Start Web Speech API for live preview (best-effort, non-critical)
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Start live-preview recognizer (best-effort, non-critical). Prefer the
+    // desktop's Vosk shim when present — Electron's webkitSpeechRecognition
+    // is a no-op there. In the browser-extension build, fall back to the
+    // native Web Speech API.
+    const SpeechRecognition =
+      window.__voskRecognition ||
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       this.recognition = new SpeechRecognition();
       this.recognition.continuous = true;
