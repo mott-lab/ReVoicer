@@ -1,179 +1,76 @@
-# PDF Converser
+# PDF Converser Desktop (Electron)
 
-A Chrome extension + Python backend for annotating academic PDFs with voice notes. Highlight text, speak your thoughts, and an LLM cleans your rambling speech into concise, well-structured annotations.
+Phase 1 skeleton: launches an Electron window that loads the existing
+`extension/viewer/viewer.html` to render PDFs via pdf.js. Backend wiring,
+sidebar, and notes are stubbed (the `chrome.*` shim in `preload.js` is a no-op)
+and will be replaced incrementally per the plan at
+`~/.claude/plans/thinking-of-re-working-this-elegant-cocke.md`.
 
-## How It Works
-
-1. Open a PDF in Chrome — the extension intercepts it and renders it with a selectable text layer
-2. Highlight text in the PDF — a blue microphone button appears
-3. Click the mic and speak your annotation
-4. Your speech is transcribed (Whisper for quality, Web Speech API for live preview)
-5. The transcript is sent to an LLM which cleans it up and auto-classifies it (summary, critique, strength, question, related work, suggestion, follow-up)
-6. View all your annotations in the Chrome side panel, organized by page, type, section, or theme
-7. Export your annotations as Markdown
-
-## Setup
-
-### Backend
-
-```bash
-cd backend
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS/Linux
-source .venv/bin/activate
-
-pip install -e .
-
-# Configure
-cp .env.example .env
-# Edit .env and set your OPENAI_API_KEY
-
-# Run
-uvicorn app.main:app --reload
-```
-
-The backend runs at `http://localhost:8000`. You can verify it's working at `http://localhost:8000/docs` (Swagger UI).
-
-### Chrome Extension
-
-1. Open `chrome://extensions/` in Chrome
-2. Enable **Developer mode** (toggle in top right)
-3. Click **Load unpacked** and select the `extension/` folder
-4. Click **Details** on the PDF Converser card and enable **Allow access to file URLs** (if you read local PDFs)
-
-### Configuration (`.env`)
+## Run
 
 ```
-OPENAI_API_KEY=sk-your-key-here    # Required for LLM cleanup and Whisper
-OPENAI_MODEL=gpt-4o-mini           # Model for cleaning up annotations
-LLM_PROVIDER=openai                # "openai" or "ollama"
-NOTES_DIR=./notes                  # Where annotation JSON files are stored
-
-# Optional: use Ollama instead
-# LLM_PROVIDER=ollama
-# OLLAMA_BASE_URL=http://localhost:11434
-# OLLAMA_MODEL=llama3.2
+cd desktop
+npm install
+npm start
 ```
 
-## Usage
+Then `File → Open PDF…` (or `Ctrl+O`) and pick a PDF.
 
-### Adding Annotations
+## Layout
 
-1. Open any PDF in Chrome (local files or web URLs)
-2. Highlight a passage of text — a small toolbar appears with two buttons
-3. **Voice**: Click the microphone button, speak your annotation, and click **Done**. Your speech is transcribed via Whisper, cleaned by the LLM, and saved.
-4. **Text**: Click the text button, type your annotation, and press **Submit** (or Ctrl+Enter). By default, your text is cleaned up by the LLM — uncheck "Clean up with LLM" to save it as-is.
+- `main.js` — Electron main process. Creates the window, builds the menu, opens
+  the PDF picker, navigates the renderer to `app.html` with the chosen file.
+- `preload.js` — Exposes a `chrome.*` shim and a `desktop.*` IPC bridge so the
+  extension code runs unchanged. `chrome.runtime.getURL`/`storage.local` are
+  shimmed; `chrome.runtime.sendMessage`/`onMessage` are wired up as a real
+  same-page pub/sub so content.js and sidebar.js can talk directly. The
+  service-worker-mediated `getCurrentPdfId` is short-circuited to read
+  `window.__pdfContentHash` (with a 5s wait while viewer.js computes it).
+- `app.html` — Split-pane layout hosting the existing `extension/viewer/`
+  toolbar+pages on the left and `extension/sidebar/` markup on the right.
+  Loads the existing viewer/lib/content/sidebar scripts in order; CSS layout
+  overrides re-anchor `viewer.css`'s position:fixed rules to the left pane.
+- `services/recent-files.js` — JSON-backed list of recently opened PDFs.
+- `start.html` — Initial blank window with an Open button.
+- `api-stub.js` — In-process implementation of the 13 backend routes.
+  Notes / documents / export are real (fs-backed); cleanup, organize, qa,
+  and transcribe are still placeholders pending phase 3b (LLM integration).
+- `services/note-store.js`, `services/document-store.js`, `services/qa-store.js`,
+  `services/export-service.js`, `services/cleanup-service.js`,
+  `services/organize-service.js`, `services/qa-service.js`,
+  `services/transcribe-service.js` — Node ports of the matching modules
+  under `backend/app/`. Same on-disk schema (`{hash}.json`, `{hash}.text.json`,
+  `{hash}.qa.json`) as the Python backend, so notes/qa can be migrated by
+  copy.
+- `services/llm-service.js` — provider-agnostic `chat()` wrapper. OpenAI via
+  the `openai` SDK; Ollama via plain `fetch` to its `/api/chat` endpoint.
+- `services/settings-store.js`, `settings.html` — settings persistence and
+  UI for choosing provider, API key, and model.
 
-Annotated text is highlighted in the PDF with colors matching the comment type. Click a highlight to jump to that annotation in the side panel. Click an annotation in the side panel to scroll the PDF to the highlighted passage.
+## Known gaps for skeleton
 
-### Asking Questions
-
-You can ask questions about the entire paper from within either the voice or text annotation workflow:
-
-1. Highlight text (optional — provides context for your question)
-2. Open the voice or text input as usual
-3. Speak or type your question, then click **Ask** (or press **Ctrl+Shift+Enter** in text mode)
-4. The answer appears in an overlay, drawing on the full document text
-
-The full text of each PDF is automatically extracted and uploaded to the backend when you first open it.
-
-### Viewing Annotations
-
-Click the PDF Converser extension icon and select **Open Notes Panel** to open the side panel. Annotations can be viewed in four modes:
-
-- **By Page Order** — chronological, grouped by page number
-- **By Type** — grouped by comment type (summary, critique, strength, etc.)
-- **By Section** — LLM infers paper sections (Introduction, Methods, Results, etc.)
-- **By Theme** — LLM groups by intellectual theme (methodology concerns, key findings, etc.)
-
-### Exporting
-
-Click **Export MD** in the side panel to download all annotations as a Markdown file.
-
-### Comment Types
-
-The LLM automatically classifies each annotation:
-
-| Type | Color | Use case |
-|------|-------|----------|
-| Summary | Blue | Restating what the text says |
-| Critique | Red | Identifying weaknesses or disagreements |
-| Strength | Green | Noting something positive or well-done |
-| Question | Orange | Expressing confusion or asking something |
-| Related Work | Purple | Connecting to other papers or ideas |
-| Suggestion | Teal | Proposing improvements or alternatives |
-| Follow-up | Yellow | Things to investigate later |
-
-## Architecture
-
-```
-extension/              Chrome Extension (Manifest V3)
-  content/              Content script (selection, FAB, speech, submission)
-  viewer/               PDF.js-based PDF viewer with selectable text layer
-  sidebar/              Chrome Side Panel (notes display, organization)
-  popup/                Settings (backend URL configuration)
-  lib/                  Shared modules (API client, speech capture, PDF ID)
-
-backend/                Python FastAPI
-  app/
-    routers/            API endpoints (notes CRUD, transcribe, organize, export)
-    services/           Business logic (LLM cleanup, note storage, organization, export)
-    prompts/            LangChain prompt templates
-    config.py           Settings via Pydantic + .env
-  notes/                JSON note files (one per PDF, named by content hash)
-```
-
-## Note Storage
-
-Annotations are stored as JSON files in the `notes/` directory (configurable via `NOTES_DIR`). Each PDF gets one file, named by the SHA-256 hash of the first 64KB of the PDF's content:
-
-```
-notes/
-  a1b2c3d4e5f6...json    # One file per PDF
-```
-
-This content-hash approach means:
-- **Rename-proof**: Moving or renaming a PDF doesn't lose its notes — same content always produces the same hash
-- **Human-readable**: Notes are plain JSON, easy to inspect or version-control
-- **O(1) lookup**: No index or database needed — the hash maps directly to the filename
-- Each file also stores the PDF title and URL as metadata for display purposes
-
-## Future Ideas
-
-These are not currently implemented but are tracked here for future development.
-
-### Full-Document Context Extensions
-The full PDF text is now extracted and stored (page-by-page) on every PDF open, and PDF Q&A is implemented. The following features can build on this stored text:
-
-- **Cross-referencing**: When you comment on a result, the LLM links it back to the method or measure that produced it. Comment on a claim in the Discussion and it finds the supporting data in Results.
-- **Context-aware annotation cleanup**: Include document context in the cleanup prompt so the LLM can resolve ambiguous references and classify comment types more accurately.
-- **Accurate section detection**: Use real section headers from the full text to make the "By Section" organize view exact instead of guessing from note snippets.
-- **Citation-aware related work**: When you make a "related work" annotation, the system checks the references section and surfaces the full citation.
-- **Auto-generated paper summary**: Produce a structured summary of the paper to provide context alongside your annotations in exports.
-- **RAG for long documents**: Add embedding-based retrieval for papers that exceed the LLM's context window.
-
-### Review-Oriented Export
-Add export templates tailored to specific workflows:
-- **Review export**: Generate a structured review following a standard format (Summary, Strengths, Weaknesses with subsections). Use provided `review-examples/` as style/tone references so the generated review matches the user's writing voice.
-- **Notes export**: Organize annotations by topic/theme for personal reference. This partially exists in the current "By Theme" view and Markdown export, but a dedicated notes-oriented template could improve the output structure.
-
-### Review Rubric Upload & Coverage Check
-Allow users to upload review instructions/rubrics (e.g., a conference review form specifying categories like novelty, rigor, clarity, related work, reproducibility). This enables two features:
-- **Review coverage report**: Compare the user's existing annotations against the rubric's categories to identify gaps — which dimensions of the rubric have been addressed by annotations and which still need attention. Available as a dedicated button in the sidebar at any time.
-- **Export-time coverage check**: When the user has uploaded a rubric and clicks Export, automatically run the coverage check first and surface any under-addressed categories before exporting, so the reviewer can fill gaps before finalizing.
-- **Structured review generation**: Use the uploaded rubric to structure the generated review export — organizing the output by the rubric's categories rather than a generic format, so the export matches what the conference expects.
-
-## Issues to address
-
-- after you make a comment and click "Done", it spawns another annotation modal next to where the mouse was. it should only spawn this on highlight. probably can fix by just turning off the click / highlight detector on submit? idk.
-- the ui / modal appears in other web pages as well when text is highlighted; should be restrained to the PDFs.
-
-
-## Other ideas
-- rework the comment type deduction. maybe we can use tags instead, since comments often fall under multiple categories. would need to review the commen types that are there already and probably add some. these could also include what part of the paper they are in or about (methods, background etc.).
-- we can always default to yellow shade highlight but let the user change the color if they want, thru a simple color icon in the comment in the notes panel.
-- i think the "ask" feature is not so useful for this version right now. let's disable it for now, but keep the functionality in the codebase to revisit.
+- The Python backend is **not** required. `preload.js` intercepts every
+  `fetch` to `http://localhost:8000/api/*` and routes it over IPC to
+  `api-stub.js` in the main process.
+- Notes, document text, and markdown export are now persistent — they live in
+  `app.getPath('userData')/notes/` (Windows: `%APPDATA%/pdf-converser-desktop/notes/`,
+  macOS: `~/Library/Application Support/pdf-converser-desktop/notes/`,
+  Linux: `~/.config/pdf-converser-desktop/notes/`). Files use the same
+  `{content_hash}.json` schema as the Python backend; existing notes can be
+  migrated by copy.
+- Settings (File → Settings…, Ctrl/Cmd+,) split text and speech independently:
+  - **Text**: OpenAI · Anthropic · Ollama · OpenAI-compatible (Groq, OpenRouter,
+    Together, LM Studio, vLLM, llama.cpp server, …). Each provider has its
+    own credentials and a Test button. Ollama's Test also lists installed
+    models. There's a global "Use LLM to clean up annotations" toggle — when
+    off, notes are stored verbatim with a heuristic type label and no LLM
+    call is made on note creation. Q&A and Organize still need a provider.
+  - **Speech**: OpenAI Whisper · Local Whisper · Off. Local Whisper runs
+    `Xenova/whisper-tiny.en` in the renderer via WebAssembly using
+    `@huggingface/transformers` (loaded from jsdelivr). First record
+    downloads ~75MB of model files from huggingface.co; subsequent records
+    use the cached model. Audio never leaves the machine. Off hides the
+    microphone button.
+- Sidebar isn't wired yet — `chrome.runtime.sendMessage` is still a no-op, so
+  the side panel and tab-switch bookkeeping don't apply. In-PDF highlights and
+  note creation work because they happen entirely inside the viewer window.
