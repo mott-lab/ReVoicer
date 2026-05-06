@@ -1,5 +1,4 @@
-// Port of backend/app/services/organize_service.py. Prompts kept verbatim
-// from backend/app/prompts/organize.py.
+// LLM-driven note organization (by section / by theme).
 
 const { chat, parseJsonResponse } = require('./llm-service');
 const { getNoteStore } = require('./note-store');

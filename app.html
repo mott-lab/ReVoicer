@@ -8,9 +8,9 @@
   <!-- Both panes' stylesheets. sidebar.css is loaded after viewer.css so its
        `body` rule wins for the right pane's typography (the layout overrides
        below pull viewer-specific positioning back into the left pane). -->
-  <link rel="stylesheet" href="../extension/viewer/viewer.css">
-  <link rel="stylesheet" href="../extension/content/content.css">
-  <link rel="stylesheet" href="../extension/sidebar/sidebar.css">
+  <link rel="stylesheet" href="viewer/viewer.css">
+  <link rel="stylesheet" href="content/content.css">
+  <link rel="stylesheet" href="sidebar/sidebar.css">
 
   <style>
     /* Split-pane layout overrides. The viewer.css and sidebar.css were each
@@ -118,20 +118,20 @@
        drives rendering; the lib scripts define the API client and helpers;
        content.js wires up selection/recording on the PDF; sidebar.js drives
        the right pane and shares an ApiClient instance via its own copy. -->
-  <script type="module" src="../extension/viewer/viewer.js"></script>
-  <script src="../extension/lib/pdf-identifier.js"></script>
-  <script src="../extension/lib/speech.js"></script>
-  <script src="../extension/lib/api-client.js"></script>
-  <script src="../extension/content/content.js"></script>
-  <script src="../extension/sidebar/sidebar.js"></script>
+  <script type="module" src="viewer/viewer.js"></script>
+  <script src="lib/pdf-identifier.js"></script>
+  <script src="lib/speech.js"></script>
+  <script src="lib/api-client.js"></script>
+  <script src="content/content.js"></script>
+  <script src="sidebar/sidebar.js"></script>
   <!-- Local Whisper runtime exposes window.__localWhisper.transcribe(blob).
        Lazy-loads the model on first use; preload.js routes here when
        speech_provider === 'local_whisper'. -->
-  <script type="module" src="./services/local-whisper-runtime.js"></script>
+  <script type="module" src="services/local-whisper-runtime.js"></script>
   <!-- Vosk runtime exposes window.__voskRecognition (a SpeechRecognition-
        shaped class). speech.js prefers this in the desktop build to stream
        partial transcripts in real time, since Electron's
        webkitSpeechRecognition is a no-op. -->
-  <script type="module" src="./services/vosk-runtime.js"></script>
+  <script type="module" src="services/vosk-runtime.js"></script>
 </body>
 </html>

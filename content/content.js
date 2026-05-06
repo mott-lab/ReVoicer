@@ -13,6 +13,18 @@ let cachedNotes = [];
 let answerOverlay = null;
 let askMode = false;
 
+// True when the configured speech provider produces the final transcript on
+// the client (Vosk in the desktop build) — in that case we skip the
+// /api/transcribe round-trip and use the live transcript directly.
+async function shouldSkipServerTranscribe() {
+  try {
+    const s = await window.desktop?.getSettings?.();
+    return s?.speech_provider === 'vosk';
+  } catch {
+    return false;
+  }
+}
+
 // Initialize
 (async () => {
   await apiClient.init();
@@ -135,9 +147,12 @@ function startRecording(selectedText) {
   speechCapture.onEnd = async (transcript, audioBlob) => {
     hideRecordingUI();
     if (askMode) {
-      // Transcribe with Whisper for better quality, then ask
+      // Transcribe with Whisper for better quality, then ask. Skipped when
+      // the user has chosen Vosk as the final provider — the live transcript
+      // is the final transcript.
       let finalQuestion = transcript.trim();
-      if (audioBlob && audioBlob.size > 0) {
+      const skipServer = await shouldSkipServerTranscribe();
+      if (!skipServer && audioBlob && audioBlob.size > 0) {
         try {
           const whisperResult = await apiClient.transcribe(audioBlob);
           if (whisperResult.text) finalQuestion = whisperResult.text;
@@ -409,9 +424,12 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
   const pdfTitle = getPdfTitle();
   const highlightData = captureHighlightData();
 
-  // If we have audio, try Whisper transcription first for better quality
+  // If we have audio, try Whisper transcription first for better quality.
+  // Skipped when the user has chosen Vosk as the final provider — the live
+  // transcript is already the final transcript.
   let finalTranscript = rawTranscript;
-  if (audioBlob && audioBlob.size > 0) {
+  const skipServer = await shouldSkipServerTranscribe();
+  if (!skipServer && audioBlob && audioBlob.size > 0) {
     showToast('Transcribing with Whisper...', 'info');
     try {
       const whisperResult = await apiClient.transcribe(audioBlob);

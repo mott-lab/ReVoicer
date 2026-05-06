@@ -1,5 +1,4 @@
-// File-based document text storage. Port of
-// backend/app/services/document_store.py.
+// File-based document text storage.
 //
 // Stores extracted PDF text at `<notesDir>/{content_hash}.text.json`. Kept
 // separate from the notes file so note CRUD doesn't touch potentially large

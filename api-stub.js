@@ -1,5 +1,6 @@
-// In-process implementation of the backend API surface. All routes now hit
-// real services under ./services/. Route table mirrors backend/app/routers/.
+// In-process implementation of the API surface fetched at
+// http://localhost:8000/api/* (intercepted by preload.js). All routes
+// dispatch to ./services/.
 //
 // (File name kept as `api-stub.js` for git history continuity — it is no
 // longer a stub.)

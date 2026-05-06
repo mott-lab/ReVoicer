@@ -1,4 +1,4 @@
-// File-based JSON note storage. Port of backend/app/services/note_store.py.
+// File-based JSON note storage.
 //
 // Each PDF's notes live in `<notesDir>/{content_hash}.json` with the same
 // schema as the Python backend, so notes copied from the FastAPI install will

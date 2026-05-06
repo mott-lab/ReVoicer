@@ -1,6 +1,4 @@
-// Port of backend/app/services/cleanup_service.py — voice/typed annotation
-// cleanup and type classification. Prompts are kept verbatim from
-// backend/app/prompts/cleanup.py.
+// Voice/typed annotation cleanup and type classification.
 
 const { chat, parseJsonResponse } = require('./llm-service');
 

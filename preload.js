@@ -98,7 +98,7 @@ window.chrome.runtime = Object.assign({}, window.chrome.runtime, {
   // stays same-origin with app.html.
   getURL(relativePath) {
     const clean = String(relativePath).replace(/^\/+/, '');
-    return `pdfc://local/app/extension/${clean}`;
+    return `pdfc://local/app/${clean}`;
   },
   // Supports both Chrome forms:
   //   sendMessage(msg) → Promise<response>
@@ -242,8 +242,7 @@ window.addEventListener('pdfc-whisper-progress', (e) => {
 window.addEventListener('pdfc-vosk-progress', (e) => {
   const d = e.detail || {};
   switch (d.stage) {
-    case 'loading-runtime': setWhisperToast('Loading live-transcript runtime…'); break;
-    case 'loading-model':   setWhisperToast('Downloading live-transcript model (~40 MB)…'); break;
+    case 'loading-model':   setWhisperToast('Loading live-transcript model…'); break;
     case 'ready':           setWhisperToast('Live transcript ready.'); break;
     case 'listening':       hideWhisperToast(); break;
     case 'done':            hideWhisperToast(); break;

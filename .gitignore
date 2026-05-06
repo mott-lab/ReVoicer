@@ -1,27 +1,13 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-.venv/
-venv/
-
-# Database
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
-
 # Environment
 .env
-backend/.env
 
 # Node / Electron
 node_modules/
-desktop/dist/
-desktop/out/
+dist/
+out/
+
+# Vosk model (~40 MB) — fetched by the postinstall script
+models/
 
 # IDE
 .vscode/
@@ -32,10 +18,6 @@ desktop/out/
 # OS
 .DS_Store
 Thumbs.db
-
-# Notes (personal annotations)
-notes/
-backend/notes/
 
 # Review examples (private)
 review-examples/

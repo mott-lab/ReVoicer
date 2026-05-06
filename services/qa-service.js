@@ -1,5 +1,4 @@
-// Port of the Q&A logic from backend/app/routers/qa.py. Prompt verbatim from
-// backend/app/prompts/qa.py.
+// Document Q&A — answers a question against the full extracted PDF text.
 
 const { chat } = require('./llm-service');
 const { getDocumentStore } = require('./document-store');

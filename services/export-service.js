@@ -1,5 +1,4 @@
-// Markdown export. Port of backend/app/services/export_service.py.
-// Output formatting is intentionally byte-identical to the Python version.
+// Markdown export.
 
 const { getNoteStore } = require('./note-store');
 

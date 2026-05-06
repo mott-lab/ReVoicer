@@ -1,5 +1,4 @@
-// File-based JSON Q&A storage. Port of backend/app/services/qa_store.py.
-// Schema: <notesDir>/{content_hash}.qa.json — same as Python.
+// File-based JSON Q&A storage. Schema: `<notesDir>/{content_hash}.qa.json`.
 
 const fs = require('node:fs/promises');
 const path = require('node:path');

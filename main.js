@@ -5,14 +5,14 @@ const apiStub = require('./api-stub');
 const { getSettingsStore } = require('./services/settings-store');
 const { getRecentFiles } = require('./services/recent-files');
 
-const PROJECT_ROOT = path.resolve(__dirname, '..');
+const PROJECT_ROOT = __dirname;
 const START_HTML = path.join(__dirname, 'start.html');
 const SETTINGS_HTML = path.join(__dirname, 'settings.html');
 
 // All app and PDF resources are served under a single privileged scheme so
 // the renderer runs with the default `webSecurity: true`. Single-host
 // (`pdfc://local/...`) keeps PDF and app responses same-origin.
-const APP_URL = 'pdfc://local/app/desktop/app.html';
+const APP_URL = 'pdfc://local/app/app.html';
 
 let mainWindow = null;
 let settingsWindow = null;

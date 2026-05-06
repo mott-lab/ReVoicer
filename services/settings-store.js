@@ -16,7 +16,11 @@ const DEFAULTS = {
   cleanup_enabled: true,             // run LLM rewrite on note creation
 
   // Speech-to-text mode for voice annotations.
-  speech_provider: 'openai_whisper', // 'openai_whisper' | 'local_whisper' | 'off'
+  // 'vosk' uses the bundled Vosk model for the final transcript (raw,
+  // lowercase, no punctuation) — pair with cleanup_enabled=false to keep
+  // the verbatim ASR output, or leave cleanup_enabled=true to let the LLM
+  // polish it.
+  speech_provider: 'openai_whisper', // 'openai_whisper' | 'local_whisper' | 'vosk' | 'off'
 
   // OpenAI (text + Whisper share the same key).
   openai_api_key: '',

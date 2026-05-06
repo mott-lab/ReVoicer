@@ -170,6 +170,7 @@
       <div class="provider-bar">
         <label><input type="radio" name="speech_provider" value="openai_whisper"><span>OpenAI Whisper</span></label>
         <label><input type="radio" name="speech_provider" value="local_whisper"><span>Local Whisper</span></label>
+        <label><input type="radio" name="speech_provider" value="vosk"><span>Vosk (raw)</span></label>
         <label><input type="radio" name="speech_provider" value="off"><span>Off</span></label>
       </div>
       <div class="help" id="speech_help"></div>
@@ -200,6 +201,8 @@
         help.textContent = 'Records audio and transcribes via OpenAI Whisper. Requires the OpenAI API key in the Text section above.';
       } else if (v === 'local_whisper') {
         help.textContent = 'Runs Whisper locally inside the app via WebAssembly. ~75MB model downloaded on first use, then cached. No audio leaves your machine, no API key required.';
+      } else if (v === 'vosk') {
+        help.textContent = 'Uses the bundled Vosk model as the final transcript — fully offline, instant, lowercase with no punctuation. Pair with the cleanup toggle above off to keep raw ASR output verbatim, or leave cleanup on to have the LLM polish it.';
       } else if (v === 'off') {
         help.textContent = 'Voice annotations disabled — the microphone button is hidden. You can still create typed annotations.';
       } else {

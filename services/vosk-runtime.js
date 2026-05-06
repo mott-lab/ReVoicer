@@ -2,10 +2,14 @@
 // for Electron, where webkitSpeechRecognition is a no-op (Chromium ships
 // without the Google Speech API key in non-Chrome builds).
 //
-// Lazy-loads vosk-browser from jsdelivr on first start() call, downloads the
-// small English Vosk model into the renderer's HTTP cache, and exposes a
-// SpeechRecognition-shaped class on `window.__voskRecognition`. speech.js
-// (shared with the browser-extension build) prefers this when present and
+// Both the vosk-browser library and the English speech model are bundled
+// locally (vendored under node_modules/vosk-browser and downloaded to
+// models/ by the postinstall script). Everything loads from pdfc:// over
+// the local protocol handler — the app runs fully offline.
+//
+// On startup the model is loaded in the background so the first mic click
+// is instant. Exposes a SpeechRecognition-shaped class on
+// `window.__voskRecognition`; speech.js prefers this when present and
 // falls back to webkitSpeechRecognition otherwise.
 //
 // Vosk only fills the live preview — the final transcript still comes from
@@ -14,10 +18,12 @@
 // Progress events are dispatched as `pdfc-vosk-progress` so preload.js can
 // render a toast without coupling to this module.
 
-const VOSK_CDN = 'https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/+esm';
-const MODEL_URL = 'https://ccoreilly.github.io/vosk-browser/models/vosk-model-small-en-us-0.15.tar.gz';
+const VOSK_LIB = 'pdfc://local/app/node_modules/vosk-browser/dist/vosk.js';
+const MODEL_URL = 'pdfc://local/app/models/vosk-model-small-en-us-0.15.tar.gz';
 
 let _modelPromise = null;
+let _modelReady = false;
+let _voskScriptPromise = null;
 
 function emit(stage, payload = {}) {
   window.dispatchEvent(new CustomEvent('pdfc-vosk-progress', {
@@ -25,22 +31,56 @@ function emit(stage, payload = {}) {
   }));
 }
 
-async function getModel() {
-  if (_modelPromise) return _modelPromise;
-  _modelPromise = (async () => {
-    emit('loading-runtime');
-    const Vosk = await import(VOSK_CDN);
-    emit('loading-model');
-    const model = await Vosk.createModel(MODEL_URL);
-    emit('ready');
-    return model;
-  })();
-  // Don't lock subsequent calls into a rejected promise.
-  _modelPromise.catch(() => { _modelPromise = null; });
+// vosk-browser is published as a UMD bundle (~5.6 MB) with the Worker and
+// WASM inlined as Blob URLs. We inject it once via <script> so it sets
+// `window.Vosk`. Async — does not block the renderer.
+function loadVoskScript() {
+  if (window.Vosk) return Promise.resolve(window.Vosk);
+  if (_voskScriptPromise) return _voskScriptPromise;
+  _voskScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = VOSK_LIB;
+    script.async = true;
+    script.onload = () => {
+      if (window.Vosk) resolve(window.Vosk);
+      else reject(new Error('vosk-browser loaded but window.Vosk is undefined'));
+    };
+    script.onerror = () => reject(new Error(`Failed to load ${VOSK_LIB}`));
+    document.head.appendChild(script);
+  });
+  _voskScriptPromise.catch(() => { _voskScriptPromise = null; });
+  return _voskScriptPromise;
+}
+
+// Silent loader — kicked off at app startup so the first mic click is
+// instant. Emits no progress events; the interactive path
+// (getModelInteractive) handles user-visible toasts only when the user is
+// actually waiting.
+function ensureModel() {
+  if (!_modelPromise) {
+    _modelPromise = (async () => {
+      const Vosk = await loadVoskScript();
+      const model = await Vosk.createModel(MODEL_URL);
+      _modelReady = true;
+      return model;
+    })();
+    _modelPromise.catch(() => { _modelPromise = null; });
+  }
   return _modelPromise;
 }
 
-// SpeechRecognition-shaped wrapper. speech.js (extension/lib/speech.js)
+// Used by start(). If the preload already finished, returns instantly with
+// no toast. If the user beat the preload, emit progress events so the toast
+// appears.
+async function getModelInteractive() {
+  if (_modelReady) return _modelPromise;
+  emit('loading-model');
+  const model = await ensureModel();
+  emit('ready');
+  return model;
+}
+
+// SpeechRecognition-shaped wrapper. speech.js (lib/speech.js)
 // expects `new SpeechRecognition()` plus { continuous, interimResults, lang,
 // onresult, onerror, onend, start(), stop() }. The result event must be
 // shaped like the Web Speech API: { resultIndex, results[i].isFinal,
@@ -68,7 +108,7 @@ class VoskRecognition {
     if (this._started) return;
     this._started = true;
     try {
-      const model = await getModel();
+      const model = await getModelInteractive();
       // Cancelled while the model was loading.
       if (!this._started) return;
 
@@ -165,3 +205,14 @@ class VoskRecognition {
 }
 
 window.__voskRecognition = VoskRecognition;
+
+// Kick off the model download in the background as soon as the renderer
+// loads, so the first mic click is instant. Skipped when speech is
+// disabled in settings; uses HTTP cache on subsequent launches.
+(async () => {
+  try {
+    const settings = await window.desktop?.getSettings?.();
+    if (settings?.speech_provider === 'off') return;
+  } catch { /* settings unavailable on first run is fine — preload anyway */ }
+  ensureModel().catch(() => { /* surfaced via toast on user-initiated start() */ });
+})();

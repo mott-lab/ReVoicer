@@ -5,11 +5,14 @@
   "main": "main.js",
   "private": true,
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "fetch-vosk-model": "node scripts/download-vosk-model.js",
+    "postinstall": "node scripts/download-vosk-model.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
-    "openai": "^4.70.0"
+    "openai": "^4.70.0",
+    "vosk-browser": "^0.0.8"
   },
   "devDependencies": {
     "electron": "^33.0.0"
