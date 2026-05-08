@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, shell } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const apiStub = require('./api-stub');
@@ -76,6 +76,14 @@ function createWindow() {
       // webSecurity stays on (default). The pdfc:// protocol handler keeps
       // app files and PDFs on the same origin so cross-origin checks pass.
     },
+  });
+
+  // Route any window.open(url) (e.g. PDF link annotations that fall back to
+  // the default href) to the OS browser instead of opening a child Electron
+  // window. http(s) only — file:// and other schemes are denied.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   mainWindow.loadFile(START_HTML);
@@ -205,6 +213,13 @@ ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
   return testConnection(provider, params || {});
 });
 ipcMain.handle('api:request', (_event, req) => apiStub.handleRequest(req));
+ipcMain.handle('desktop:openExternal', (_e, url) => {
+  // Only allow web URLs — never let arbitrary input invoke shell with file://
+  // or custom-scheme handlers.
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
+  shell.openExternal(url);
+  return true;
+});
 
 app.whenReady().then(() => {
   const userData = app.getPath('userData');

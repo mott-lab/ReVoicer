@@ -95,6 +95,11 @@ async function loadPdf(url) {
       const textLayerDiv = document.createElement('div');
       textLayerDiv.className = 'text-layer';
       pageDiv.appendChild(textLayerDiv);
+      // Annotation layer holds clickable link rectangles. Sits on top of the
+      // text layer so links win over text selection in their bounding box.
+      const annotationLayerDiv = document.createElement('div');
+      annotationLayerDiv.className = 'annotation-layer';
+      pageDiv.appendChild(annotationLayerDiv);
       return pageDiv;
     });
     for (const div of pageDivs) pagesContainer.appendChild(div);
@@ -147,6 +152,70 @@ function renderTextLayer(textContent, container, viewport) {
   }
 }
 
+// Render link annotations as absolute-positioned <a> elements. We only handle
+// `Link` annotations (URLs and internal page jumps) — that covers references,
+// table-of-contents entries, and DOIs in academic PDFs. Form fields and
+// other annotation subtypes are ignored.
+function renderAnnotationLayer(annotations, container, viewport) {
+  for (const ann of annotations) {
+    if (ann.subtype !== 'Link') continue;
+    if (!ann.url && !ann.dest) continue;
+
+    // viewport.convertToViewportRectangle returns viewport-space coords with
+    // y axis flipped vs. PDF space; normalizeRect orders them low→high so
+    // (x1,y1) is the top-left in CSS space.
+    const [x1, y1, x2, y2] = pdfjsLib.Util.normalizeRect(
+      viewport.convertToViewportRectangle(ann.rect),
+    );
+
+    const a = document.createElement('a');
+    a.className = 'annotation-link';
+    a.style.left = `${x1}px`;
+    a.style.top = `${y1}px`;
+    a.style.width = `${Math.max(1, x2 - x1)}px`;
+    a.style.height = `${Math.max(1, y2 - y1)}px`;
+
+    if (ann.url) {
+      // Set href so the link is keyboard-focusable and shows the URL on
+      // hover via the title attribute. The click handler routes through
+      // shell.openExternal so the OS browser opens it, not a child window.
+      a.href = ann.url;
+      a.title = ann.url;
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.desktop?.openExternal?.(ann.url);
+      });
+    } else {
+      a.href = '#';
+      a.title = 'Jump to destination';
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        jumpToDestination(ann.dest).catch((err) => {
+          console.warn('PDF Converser: could not resolve link destination', err);
+        });
+      });
+    }
+    container.appendChild(a);
+  }
+}
+
+// Resolve a Link annotation's `dest` (named string or explicit array) to a
+// page number and scroll there. Drops y-offset precision — landing on the
+// page is enough for academic-paper navigation.
+async function jumpToDestination(dest) {
+  let resolved = dest;
+  if (typeof dest === 'string') {
+    resolved = await pdfDoc.getDestination(dest);
+  }
+  if (!Array.isArray(resolved) || resolved.length === 0) return;
+  const pageRef = resolved[0];
+  const pageIndex = await pdfDoc.getPageIndex(pageRef);
+  scrollToPage(pageIndex + 1);
+  document.getElementById('page-input').value = pageIndex + 1;
+}
+
 async function rerender() {
   if (!pdfDoc || pdfPages.length === 0) return;
   const myGen = ++renderGeneration;
@@ -177,6 +246,7 @@ async function rerender() {
     canvas.style.width = `${Math.floor(vp.width)}px`;
     canvas.style.height = `${Math.floor(vp.height)}px`;
     div.querySelector('.text-layer').innerHTML = '';
+    div.querySelector('.annotation-layer').innerHTML = '';
   }
 
   // Page-by-page render. We bail after every await if a newer zoom kicked
@@ -214,6 +284,10 @@ async function rerender() {
     textLayerDiv.innerHTML = '';
     renderTextLayer(textContent, textLayerDiv, viewport);
     pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
+
+    const annotations = await page.getAnnotations();
+    if (myGen !== renderGeneration) return;
+    renderAnnotationLayer(annotations, div.querySelector('.annotation-layer'), viewport);
 
     document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
   }

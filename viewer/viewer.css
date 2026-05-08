@@ -137,6 +137,36 @@ body {
   background: rgba(0, 100, 200, 0.3);
 }
 
+/* Annotation layer — link rectangles only. Container is transparent and
+   pointer-events:none so clicks pass through to the text layer for
+   selection. Each link inside re-enables pointer-events for itself. */
+.annotation-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.annotation-link {
+  position: absolute;
+  display: block;
+  pointer-events: auto;
+  cursor: pointer;
+  text-decoration: none;
+  /* Subtle hover indicator — invisible at rest so the link doesn't obscure
+     the underlying PDF text. */
+  background: transparent;
+  border-radius: 2px;
+  transition: background 0.1s;
+}
+
+.annotation-link:hover {
+  background: rgba(255, 235, 59, 0.25);
+}
+
 /* Loading state */
 #loading-msg {
   color: #ccc;

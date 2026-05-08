@@ -598,6 +598,44 @@ function renderHighlightsForPage(pageNum) {
   }
 }
 
+// Group raw DOMRects from Range.getClientRects() into one rect per visual
+// line. Two rects belong to the same line when their vertical centers fall
+// within half the smaller rect's height of each other — that's tight enough
+// to keep superscripts/subscripts on a separate row, but loose enough to
+// merge same-line text runs that have slightly different ascender heights.
+function mergeRectsByLine(rects) {
+  const filtered = [];
+  for (const r of rects) {
+    if (r.width > 0 && r.height > 0) filtered.push(r);
+  }
+  if (filtered.length === 0) return [];
+
+  filtered.sort((a, b) => a.top - b.top || a.left - b.left);
+
+  const lines = [];
+  for (const r of filtered) {
+    const cur = lines[lines.length - 1];
+    if (cur) {
+      const tolerance = Math.min(r.height, cur.height) * 0.5;
+      const curCenter = cur.top + cur.height / 2;
+      const rCenter = r.top + r.height / 2;
+      if (Math.abs(curCenter - rCenter) <= tolerance) {
+        const newLeft = Math.min(cur.left, r.left);
+        const newRight = Math.max(cur.left + cur.width, r.left + r.width);
+        const newTop = Math.min(cur.top, r.top);
+        const newBottom = Math.max(cur.top + cur.height, r.top + r.height);
+        cur.left = newLeft;
+        cur.top = newTop;
+        cur.width = newRight - newLeft;
+        cur.height = newBottom - newTop;
+        continue;
+      }
+    }
+    lines.push({ left: r.left, top: r.top, width: r.width, height: r.height });
+  }
+  return lines;
+}
+
 function renderNoteHighlight(note) {
   const { highlight_data, page_number, id } = note;
   if (!highlight_data) return;
@@ -640,11 +678,16 @@ function renderNoteHighlight(note) {
     range.setStart(startTextNode, Math.min(startOffset, startTextNode.length));
     range.setEnd(endTextNode, Math.min(endOffset, endTextNode.length));
 
-    const rects = range.getClientRects();
+    // getClientRects() over a multi-line selection often returns several
+    // overlapping rects per fully-selected line (one per text-layer span,
+    // sometimes plus the parent box) — stacking those produces visibly
+    // doubled-up highlight color on middle lines while the partial start/end
+    // lines look fine. Merge by line before rendering so each visual line
+    // gets exactly one highlight div.
+    const lines = mergeRectsByLine(range.getClientRects());
     const pageRect = page.getBoundingClientRect();
 
-    for (const rect of rects) {
-      if (rect.width === 0 || rect.height === 0) continue;
+    for (const rect of lines) {
       const highlight = document.createElement('div');
       highlight.className = `pcr-highlight pcr-highlight-${primaryTag}`;
       highlight.dataset.noteId = id;

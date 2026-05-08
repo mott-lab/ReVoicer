@@ -132,6 +132,7 @@ window.desktop = {
   getSettings: () => ipcRenderer.invoke('desktop:getSettings'),
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
+  openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
 };
 
 // Toggle a CSS class on <html> when speech is off so the FAB's mic button
