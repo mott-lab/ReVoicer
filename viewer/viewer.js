@@ -12,6 +12,16 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 4.0;
 const SCALE_STEP = 0.25;
 
+// Stable render state. Page divs are built once on PDF load and reused on
+// every zoom — we resize them in place rather than tearing down and rebuilding
+// the page list. The generation counter + activeRenderTask let a new zoom
+// cancel the in-flight render so concurrent passes can't race to appendChild.
+let pdfPages = [];
+let pageDivs = [];
+let renderGeneration = 0;
+let activeRenderTask = null;
+let textExtractedFired = false;
+
 // Get the PDF URL from query params
 const params = new URLSearchParams(window.location.search);
 const pdfUrl = params.get('file');
@@ -58,60 +68,45 @@ async function loadPdf(url) {
     document.getElementById('page-input').max = pdfDoc.numPages;
     document.title = `PDF Converser - ${decodeURIComponent(url.split('/').pop().split('?')[0])}`;
 
-    pagesContainer.innerHTML = '';
-
-    // Render all pages
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-      await renderPage(i, pagesContainer);
-      document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i } }));
+    // Reset render state for the new document.
+    if (activeRenderTask) {
+      try { activeRenderTask.cancel(); } catch { /* ignore */ }
+      activeRenderTask = null;
     }
+    renderGeneration++;
+    textExtractedFired = false;
+    for (const k of Object.keys(pageTexts)) delete pageTexts[k];
 
-    // Expose page texts for content script and dispatch extraction event
-    window.__pdfPageTexts = pageTexts;
-    document.dispatchEvent(new CustomEvent('pdftextextracted', { detail: { pageTexts } }));
+    // Pre-fetch every PDFPageProxy. pdf.js caches page objects internally, so
+    // resolving them all now lets later getViewport() calls stay synchronous.
+    pdfPages = await Promise.all(
+      Array.from({ length: pdfDoc.numPages }, (_, i) => pdfDoc.getPage(i + 1)),
+    );
 
-    // Fit to width on initial load
+    // Build the page DOM exactly once. From here on, zoom changes mutate the
+    // existing canvas/text-layer rather than re-appending pages.
+    pagesContainer.innerHTML = '';
+    pageDivs = pdfPages.map((_, i) => {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'pdf-page';
+      pageDiv.dataset.pageNumber = i + 1;
+      const canvas = document.createElement('canvas');
+      pageDiv.appendChild(canvas);
+      const textLayerDiv = document.createElement('div');
+      textLayerDiv.className = 'text-layer';
+      pageDiv.appendChild(textLayerDiv);
+      return pageDiv;
+    });
+    for (const div of pageDivs) pagesContainer.appendChild(div);
+
+    // Initial render at the current scale, then fit-to-width (which triggers
+    // its own rerender — the generation guard handles the overlap cleanly).
+    await rerender();
     fitToWidth();
   } catch (err) {
     console.error('PDF load error:', err);
     pagesContainer.innerHTML = `<div id="loading-msg">Failed to load PDF: ${err.message}</div>`;
   }
-}
-
-async function renderPage(pageNum, container) {
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale: currentScale });
-
-  // Create page wrapper
-  const pageDiv = document.createElement('div');
-  pageDiv.className = 'pdf-page';
-  pageDiv.dataset.pageNumber = pageNum;
-  pageDiv.style.width = `${viewport.width}px`;
-  pageDiv.style.height = `${viewport.height}px`;
-
-  // Canvas for rendering
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  pageDiv.appendChild(canvas);
-
-  // Text layer for selection
-  const textLayerDiv = document.createElement('div');
-  textLayerDiv.className = 'text-layer';
-  pageDiv.appendChild(textLayerDiv);
-
-  container.appendChild(pageDiv);
-
-  // Render the page to canvas
-  await page.render({ canvasContext: ctx, viewport }).promise;
-
-  // Render text layer
-  const textContent = await page.getTextContent();
-  renderTextLayer(textContent, textLayerDiv, viewport);
-
-  // Accumulate page text for full-document context
-  pageTexts[pageNum] = textContent.items.map(item => item.str).join(' ');
 }
 
 function renderTextLayer(textContent, container, viewport) {
@@ -153,11 +148,83 @@ function renderTextLayer(textContent, container, viewport) {
 }
 
 async function rerender() {
-  const pagesContainer = document.getElementById('pages');
-  pagesContainer.innerHTML = '';
-  for (let i = 1; i <= pdfDoc.numPages; i++) {
-    await renderPage(i, pagesContainer);
-    document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i } }));
+  if (!pdfDoc || pdfPages.length === 0) return;
+  const myGen = ++renderGeneration;
+
+  // Cancel the previous pass's in-flight pdf.js render so concurrent zooms
+  // don't both try to draw into the same canvases.
+  if (activeRenderTask) {
+    try { activeRenderTask.cancel(); } catch { /* ignore */ }
+    activeRenderTask = null;
+  }
+
+  // Synchronously resize every page to the new scale. This makes the
+  // scrollbar settle to its final size immediately — no shrink-then-grow
+  // flicker — even before the first canvas has been redrawn.
+  //
+  // HiDPI: the canvas backing store is scaled by devicePixelRatio so text
+  // stays crisp on Retina/4K displays. CSS size stays at the logical
+  // viewport size; only the pixel buffer grows.
+  const dpr = window.devicePixelRatio || 1;
+  for (let i = 0; i < pdfPages.length; i++) {
+    const vp = pdfPages[i].getViewport({ scale: currentScale });
+    const div = pageDivs[i];
+    div.style.width = `${vp.width}px`;
+    div.style.height = `${vp.height}px`;
+    const canvas = div.querySelector('canvas');
+    canvas.width = Math.floor(vp.width * dpr);
+    canvas.height = Math.floor(vp.height * dpr);
+    canvas.style.width = `${Math.floor(vp.width)}px`;
+    canvas.style.height = `${Math.floor(vp.height)}px`;
+    div.querySelector('.text-layer').innerHTML = '';
+  }
+
+  // Page-by-page render. We bail after every await if a newer zoom kicked
+  // off, so a stale generation can't keep mutating canvases or firing events.
+  for (let i = 0; i < pdfPages.length; i++) {
+    if (myGen !== renderGeneration) return;
+    const page = pdfPages[i];
+    const div = pageDivs[i];
+    const viewport = page.getViewport({ scale: currentScale });
+    const canvas = div.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Match the DPR-multiplied canvas: pdf.js draws into a buffer that's
+    // `dpr` times larger than the viewport, then the browser downsamples to
+    // CSS pixels. Without this transform pdf.js would draw at viewport size
+    // into the larger buffer and the result would be upscaled (blurry).
+    const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
+    const task = page.render({ canvasContext: ctx, viewport, transform });
+    activeRenderTask = task;
+    try {
+      await task.promise;
+    } catch (err) {
+      // pdf.js throws RenderingCancelledException when cancel() is called;
+      // that's expected when a newer zoom raced this one.
+      if (myGen !== renderGeneration) return;
+      throw err;
+    } finally {
+      if (activeRenderTask === task) activeRenderTask = null;
+    }
+    if (myGen !== renderGeneration) return;
+
+    const textContent = await page.getTextContent();
+    if (myGen !== renderGeneration) return;
+    const textLayerDiv = div.querySelector('.text-layer');
+    textLayerDiv.innerHTML = '';
+    renderTextLayer(textContent, textLayerDiv, viewport);
+    pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
+
+    document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
+  }
+
+  // Fire pdftextextracted exactly once per PDF load — text content doesn't
+  // change with zoom, so subsequent passes shouldn't re-trigger consumers
+  // (content.js uploads the document text on this event).
+  if (myGen === renderGeneration && !textExtractedFired) {
+    textExtractedFired = true;
+    window.__pdfPageTexts = pageTexts;
+    document.dispatchEvent(new CustomEvent('pdftextextracted', { detail: { pageTexts } }));
   }
 }
 

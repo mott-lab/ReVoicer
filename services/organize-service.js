@@ -1,18 +1,26 @@
-// LLM-driven note organization (by section / by theme).
+// Note organization. Section view groups by the stored `section` field on
+// each note (set by the cleanup-service at note-creation time). Theme view is
+// still LLM-driven over the full note set.
 
 const { chat, parseJsonResponse } = require('./llm-service');
 const { getNoteStore } = require('./note-store');
 
-const BY_SECTION_SYSTEM = `You are organizing annotations from an academic paper.
-Given a list of annotations with their page numbers and highlighted text, group them by logical sections of the paper (e.g., Abstract, Introduction, Related Work, Methods, Results, Discussion, Conclusion).
+const SECTION_ORDER = [
+  'abstract', 'introduction', 'background', 'related_work_section',
+  'methods', 'results', 'discussion', 'conclusion', 'references',
+];
 
-Infer section names from the highlighted text context and page numbers.
-If you cannot determine the section, use "Uncategorized".
-
-Return a JSON object with this exact structure:
-{"groups": [{"title": "Section Name", "note_ids": ["id1", "id2", "id3"]}]}
-
-Only output valid JSON. No other text.`;
+const SECTION_LABELS = {
+  abstract: 'Abstract',
+  introduction: 'Introduction',
+  background: 'Background',
+  related_work_section: 'Related Work',
+  methods: 'Methods',
+  results: 'Results',
+  discussion: 'Discussion',
+  conclusion: 'Conclusion',
+  references: 'References',
+};
 
 const BY_THEME_SYSTEM = `You are organizing annotations from an academic paper.
 Given a list of annotations with their highlighted text and cleaned comments, group them by intellectual theme or topic. Examples of themes:
@@ -31,10 +39,34 @@ Return a JSON object with this exact structure:
 
 Only output valid JSON. No other text.`;
 
-async function organizeNotes(pdfIdentifier, mode) {
-  const notes = await getNoteStore().listNotes(pdfIdentifier);
-  if (notes.length === 0) return { groups: [] };
+function organizeBySection(notes) {
+  const buckets = new Map();
+  for (const n of notes) {
+    const key = n.section || 'uncategorized';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(n);
+  }
+  const groups = [];
+  for (const key of SECTION_ORDER) {
+    if (buckets.has(key)) {
+      groups.push({ title: SECTION_LABELS[key], notes: buckets.get(key) });
+      buckets.delete(key);
+    }
+  }
+  // Anything else (custom values that slipped through, or 'uncategorized')
+  // goes at the end, alphabetised, with Uncategorized last.
+  const remaining = [...buckets.keys()].filter((k) => k !== 'uncategorized').sort();
+  for (const key of remaining) {
+    groups.push({ title: SECTION_LABELS[key] || key, notes: buckets.get(key) });
+  }
+  if (buckets.has('uncategorized')) {
+    groups.push({ title: 'Uncategorized', notes: buckets.get('uncategorized') });
+  }
+  return { groups };
+}
 
+async function organizeByTheme(notes) {
+  if (notes.length === 0) return { groups: [] };
   const notesData = notes.map((n) => ({
     id: n.id,
     page_number: n.page_number || 0,
@@ -43,15 +75,10 @@ async function organizeNotes(pdfIdentifier, mode) {
   }));
   const notesJson = JSON.stringify(notesData, null, 2);
 
-  const system = mode === 'section' ? BY_SECTION_SYSTEM : BY_THEME_SYSTEM;
-  const user = `Here are the annotations:\n\n${notesJson}`;
-
   let content;
   try {
-    content = await chat({ system, user });
+    content = await chat({ system: BY_THEME_SYSTEM, user: `Here are the annotations:\n\n${notesJson}` });
   } catch (err) {
-    // Surface the error but also fall back so the sidebar still renders
-    // something. Mirrors the Python "single bucket" fallback.
     return { groups: [{ title: `All Notes (LLM error: ${err.message})`, notes }] };
   }
 
@@ -71,6 +98,13 @@ async function organizeNotes(pdfIdentifier, mode) {
     }
   }
   return { groups };
+}
+
+async function organizeNotes(pdfIdentifier, mode) {
+  const notes = await getNoteStore().listNotes(pdfIdentifier);
+  if (notes.length === 0) return { groups: [] };
+  if (mode === 'section') return organizeBySection(notes);
+  return organizeByTheme(notes);
 }
 
 module.exports = { organizeNotes };

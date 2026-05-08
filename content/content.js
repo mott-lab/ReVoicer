@@ -12,6 +12,10 @@ let currentSelectionRange = null;
 let cachedNotes = [];
 let answerOverlay = null;
 let askMode = false;
+// True while a recording or text-input overlay is open. The mouseup listener
+// short-circuits in this state so clicking Done/Submit/Ask doesn't re-spawn
+// the FAB next to the cursor.
+let overlayActive = false;
 
 // True when the configured speech provider produces the final transcript on
 // the client (Vosk in the desktop build) — in that case we skip the
@@ -50,10 +54,22 @@ async function shouldSkipServerTranscribe() {
 document.addEventListener('mouseup', (e) => {
   // Small delay lets the selection finalize
   setTimeout(() => {
+    // Don't spawn while an annotation overlay is open — covers both the
+    // click on Done/Submit/Ask (overlay already up) and the click on the
+    // FAB mic/text buttons (overlay opens between mouseup and this fire).
+    if (overlayActive) return;
     const selection = window.getSelection();
     const selectedText = selection?.toString().trim();
 
     if (selectedText && selectedText.length > 0) {
+      // Restrict the FAB to PDF text. Selecting text in the sidebar pane
+      // (note bodies, Q&A answers) must not trigger annotation flow.
+      const anchor = selection.anchorNode;
+      const anchorEl = anchor?.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+      if (!anchorEl?.closest?.('.text-layer')) {
+        hideFab();
+        return;
+      }
       currentSelectedText = selectedText;
       // Clone the range before it's lost on next interaction
       if (selection.rangeCount > 0) {
@@ -206,12 +222,15 @@ function showRecordingUI(selectedText) {
     </div>
   `;
   document.body.appendChild(recordingOverlay);
+  overlayActive = true;
 
   document.getElementById('pcr-stop-btn').onclick = () => {
+    clearSelectionForSubmit();
     askMode = false;
     speechCapture.stop();
   };
   document.getElementById('pcr-ask-btn').onclick = () => {
+    clearSelectionForSubmit();
     askMode = true;
     speechCapture.stop();
   };
@@ -220,6 +239,15 @@ function showRecordingUI(selectedText) {
     speechCapture.stop();
     hideRecordingUI();
   };
+}
+
+// Clear the residual PDF selection (and our cached range) so that, after the
+// overlay closes, no leftover mouseup re-spawns the FAB.
+function clearSelectionForSubmit() {
+  try { window.getSelection()?.removeAllRanges(); } catch { /* ignore */ }
+  currentSelectedText = '';
+  // Note: keep currentSelectionRange — submit handlers still need it for
+  // captureHighlightData(). It's cleared in hide*UI() below.
 }
 
 function updateRecordingTranscript(text) {
@@ -232,6 +260,10 @@ function hideRecordingUI() {
     recordingOverlay.remove();
     recordingOverlay = null;
   }
+  overlayActive = false;
+  // Don't clear currentSelectionRange here — submitNote() runs after this in
+  // the speechCapture.onEnd path and still needs it for captureHighlightData()
+  // and getCurrentPageNumber(). The next selection will overwrite it.
 }
 
 // === Text Input ===
@@ -267,6 +299,7 @@ function showTextInputUI(selectedText) {
     </div>
   `;
   document.body.appendChild(textInputOverlay);
+  overlayActive = true;
 
   const textarea = document.getElementById('pcr-text-area');
   textarea.focus();
@@ -304,6 +337,7 @@ function submitFromTextInput(selectedText) {
     return;
   }
 
+  clearSelectionForSubmit();
   hideTextInputUI();
   submitTypedNote(selectedText, text, !checkbox.checked);
 }
@@ -317,6 +351,7 @@ function askFromTextInput(selectedText) {
     return;
   }
 
+  clearSelectionForSubmit();
   hideTextInputUI();
   submitQuestion(selectedText, text);
 }
@@ -326,6 +361,7 @@ function hideTextInputUI() {
     textInputOverlay.remove();
     textInputOverlay = null;
   }
+  overlayActive = false;
 }
 
 // === PDF Q&A ===
@@ -563,8 +599,16 @@ function renderHighlightsForPage(pageNum) {
 }
 
 function renderNoteHighlight(note) {
-  const { highlight_data, page_number, comment_type, id } = note;
+  const { highlight_data, page_number, id } = note;
   if (!highlight_data) return;
+  // Color sourcing:
+  //   1. color_override (user-picked hex from the side panel)
+  //   2. primary tag from comment_tags (CSS class drives the color)
+  //   3. legacy comment_type for old notes
+  const primaryTag = (Array.isArray(note.comment_tags) && note.comment_tags.length > 0)
+    ? note.comment_tags[0]
+    : (note.comment_type || 'summary');
+  const colorOverride = note.color_override || null;
 
   const page = document.querySelector(`.pdf-page[data-page-number="${page_number}"]`);
   if (!page) return;
@@ -602,8 +646,9 @@ function renderNoteHighlight(note) {
     for (const rect of rects) {
       if (rect.width === 0 || rect.height === 0) continue;
       const highlight = document.createElement('div');
-      highlight.className = `pcr-highlight pcr-highlight-${comment_type}`;
+      highlight.className = `pcr-highlight pcr-highlight-${primaryTag}`;
       highlight.dataset.noteId = id;
+      if (colorOverride) highlight.style.background = colorOverride;
       highlight.style.left = `${rect.left - pageRect.left}px`;
       highlight.style.top = `${rect.top - pageRect.top}px`;
       highlight.style.width = `${rect.width}px`;
@@ -676,6 +721,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message.action === 'scrollToHighlight') {
     scrollToAndFlashHighlight(message.noteId);
+  }
+  // Triggered by the sidebar after edits that affect the in-PDF highlight
+  // (currently: per-note color override). Re-fetches notes and re-renders.
+  if (message.action === 'notesChanged') {
+    loadAndRenderHighlights();
   }
 });
 

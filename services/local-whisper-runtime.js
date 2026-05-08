@@ -90,7 +90,15 @@ async function transcribe(blob) {
   emit('decoding', {});
   const samples = await decodeTo16kMono(blob);
   emit('inferring', { samples: samples.length });
-  const result = await transcriber(samples);
+  // Whisper's encoder has a hard 30-second context window. Without these
+  // parameters, transformers.js silently truncates the input — anything past
+  // 30 s gets dropped from the transcript. chunk_length_s splits the audio
+  // into 30 s windows; stride_length_s adds overlap so words on chunk
+  // boundaries don't get clipped.
+  const result = await transcriber(samples, {
+    chunk_length_s: 30,
+    stride_length_s: 5,
+  });
   emit('done', {});
   return { text: (result?.text || '').trim() };
 }

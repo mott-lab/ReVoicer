@@ -36,8 +36,12 @@ async function exportToMarkdown(pdfIdentifier) {
       lines.push('');
     }
 
-    const typeLabel = titleCase(note.comment_type || 'summary');
-    lines.push(`**[${typeLabel}]**`);
+    const tags = (Array.isArray(note.comment_tags) && note.comment_tags.length > 0)
+      ? note.comment_tags
+      : [note.comment_type || 'summary'];
+    const tagLabels = tags.map(titleCase).join(', ');
+    const sectionLabel = note.section ? ` · ${titleCase(note.section.replace(/_section$/, ''))}` : '';
+    lines.push(`**[${tagLabels}${sectionLabel}]**`);
     lines.push('');
     lines.push(`> ${note.selected_text}`);
     lines.push('');

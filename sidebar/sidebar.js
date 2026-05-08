@@ -212,29 +212,57 @@ function renderNotesList(notes, container) {
     return;
   }
 
-  container.innerHTML = notes.map(note => `
+  container.innerHTML = notes.map(note => renderNoteCard(note)).join('');
+
+  attachNoteActionHandlers(container);
+  attachNoteCardClickHandlers(container);
+}
+
+// Renders a single note card. Used by the chronological list, the grouped
+// views, and the by-type view (where one note may appear under multiple tag
+// groups).
+function renderNoteCard(note, { withActions = true } = {}) {
+  const tags = (Array.isArray(note.comment_tags) && note.comment_tags.length > 0)
+    ? note.comment_tags
+    : [note.comment_type || 'summary'];
+  const badges = tags
+    .map(t => `<span class="note-type-badge note-type-${escapeAttr(t)}">${formatType(t)}</span>`)
+    .join(' ');
+  const sectionPill = note.section
+    ? `<span class="note-section-pill">${escapeHtml(formatSection(note.section))}</span>`
+    : '';
+  const swatchStyle = note.color_override
+    ? `style="background:${escapeAttr(note.color_override)}"`
+    : '';
+  const actions = withActions ? `
+      <div class="note-actions">
+        <button class="note-color" data-id="${note.id}" ${swatchStyle} title="Change highlight color">●</button>
+        <button class="note-reclean" data-id="${note.id}" title="Re-clean with LLM">Re-clean</button>
+        <button class="note-delete" data-id="${note.id}" title="Delete this note">Delete</button>
+      </div>` : '';
+  const raw = withActions ? `
+      <details class="note-raw">
+        <summary>Raw transcript</summary>
+        <p>${escapeHtml(note.raw_transcript)}</p>
+      </details>` : '';
+  return `
     <div class="note-card" data-id="${note.id}">
       <div class="note-meta">
-        <span class="note-type-badge note-type-${note.comment_type}">${formatType(note.comment_type)}</span>
+        ${badges}
+        ${sectionPill}
         <span class="note-page">${note.page_number ? 'Page ' + note.page_number : 'Page ?'}</span>
         <span class="note-time">${formatTime(note.created_at)}</span>
       </div>
       <blockquote class="note-highlight">${escapeHtml(note.selected_text)}</blockquote>
-      <div class="note-comment">${escapeHtml(note.cleaned_comment)}</div>
-      <details class="note-raw">
-        <summary>Raw transcript</summary>
-        <p>${escapeHtml(note.raw_transcript)}</p>
-      </details>
-      <div class="note-actions">
-        <button class="note-reclean" data-id="${note.id}" title="Re-clean with LLM">Re-clean</button>
-        <button class="note-delete" data-id="${note.id}" title="Delete this note">Delete</button>
-      </div>
+      <div class="note-comment">${escapeHtml(note.cleaned_comment)}</div>${raw}${actions}
     </div>
-  `).join('');
+  `;
+}
 
-  // Attach event handlers
+function attachNoteActionHandlers(container) {
   container.querySelectorAll('.note-delete').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (confirm('Delete this annotation?')) {
         await api.deleteNote(btn.dataset.id, currentPdfId);
         loadNotes(document.getElementById('view-mode').value);
@@ -243,7 +271,8 @@ function renderNotesList(notes, container) {
   });
 
   container.querySelectorAll('.note-reclean').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       btn.textContent = 'Cleaning...';
       btn.disabled = true;
       try {
@@ -257,7 +286,68 @@ function renderNotesList(notes, container) {
     });
   });
 
-  attachNoteCardClickHandlers(container);
+  container.querySelectorAll('.note-color').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openColorPicker(btn);
+    });
+  });
+}
+
+// Inline picker that anchors itself under the swatch button. Sends the
+// selected color (or null = reset to type-derived) to the server, then
+// reloads the notes list and asks the PDF pane to refresh highlights.
+function openColorPicker(anchorBtn) {
+  // Close any existing picker first.
+  document.querySelectorAll('.note-color-picker').forEach(p => p.remove());
+
+  const palette = [
+    { hex: '#ffee58', label: 'Yellow' },
+    { hex: '#42a5f5', label: 'Blue' },
+    { hex: '#ef5350', label: 'Red' },
+    { hex: '#66bb6a', label: 'Green' },
+    { hex: '#ffa726', label: 'Orange' },
+    { hex: '#ab47bc', label: 'Purple' },
+    { hex: '#26a69a', label: 'Teal' },
+  ];
+  const picker = document.createElement('div');
+  picker.className = 'note-color-picker';
+  picker.innerHTML = palette.map(p =>
+    `<button class="note-color-swatch" data-color="${p.hex}" title="${p.label}" style="background:${p.hex}"></button>`
+  ).join('') + `<button class="note-color-reset" data-color="" title="Reset to default">Reset</button>`;
+  document.body.appendChild(picker);
+
+  const rect = anchorBtn.getBoundingClientRect();
+  picker.style.left = `${rect.left}px`;
+  picker.style.top = `${rect.bottom + 4}px`;
+
+  const onPick = async (e) => {
+    const target = e.target.closest('[data-color]');
+    if (!target) return;
+    const color = target.dataset.color || null;
+    picker.remove();
+    document.removeEventListener('mousedown', onOutside, true);
+    try {
+      await api.updateNote(anchorBtn.dataset.id, currentPdfId, { color_override: color });
+      loadNotes(document.getElementById('view-mode').value);
+      chrome.runtime.sendMessage({
+        action: 'notesChanged',
+        pdfIdentifier: currentPdfId,
+      }).catch(() => {});
+    } catch (err) {
+      alert('Failed to update color.');
+    }
+  };
+  picker.addEventListener('click', onPick);
+
+  const onOutside = (e) => {
+    if (!picker.contains(e.target) && e.target !== anchorBtn) {
+      picker.remove();
+      document.removeEventListener('mousedown', onOutside, true);
+    }
+  };
+  // Defer attaching the outside-click guard until after this click bubbles.
+  setTimeout(() => document.addEventListener('mousedown', onOutside, true), 0);
 }
 
 function renderNotesByType(notes, container) {
@@ -265,13 +355,19 @@ function renderNotesByType(notes, container) {
     container.innerHTML = '<p class="empty-state">No annotations to organize.</p>';
     return;
   }
-  // Group notes by comment_type, maintaining a logical order
+  // Multi-tag dispatch: a note appears under each of its tags' groups, since
+  // the whole point of multi-tag classification is that a comment can span
+  // categories.
   const typeOrder = ['summary', 'strength', 'critique', 'question', 'suggestion', 'related_work', 'follow_up'];
   const grouped = {};
   for (const note of notes) {
-    const t = note.comment_type || 'summary';
-    if (!grouped[t]) grouped[t] = [];
-    grouped[t].push(note);
+    const tags = (Array.isArray(note.comment_tags) && note.comment_tags.length > 0)
+      ? note.comment_tags
+      : [note.comment_type || 'summary'];
+    for (const t of tags) {
+      if (!grouped[t]) grouped[t] = [];
+      grouped[t].push(note);
+    }
   }
   const groups = typeOrder
     .filter(t => grouped[t])
@@ -288,16 +384,7 @@ function renderGroupedNotes(groups, container) {
   container.innerHTML = groups.map(group => `
     <div class="note-group">
       <h3 class="group-title">${escapeHtml(group.title)}</h3>
-      ${group.notes.map(note => `
-        <div class="note-card" data-id="${note.id}">
-          <div class="note-meta">
-            <span class="note-type-badge note-type-${note.comment_type}">${formatType(note.comment_type)}</span>
-            <span class="note-page">${note.page_number ? 'Page ' + note.page_number : 'Page ?'}</span>
-          </div>
-          <blockquote class="note-highlight">${escapeHtml(note.selected_text)}</blockquote>
-          <div class="note-comment">${escapeHtml(note.cleaned_comment)}</div>
-        </div>
-      `).join('')}
+      ${group.notes.map(note => renderNoteCard(note, { withActions: false })).join('')}
     </div>
   `).join('');
 
@@ -365,6 +452,29 @@ function formatType(type) {
     follow_up: 'Follow-up',
   };
   return labels[type] || type;
+}
+
+function formatSection(section) {
+  const labels = {
+    abstract: 'Abstract',
+    introduction: 'Introduction',
+    background: 'Background',
+    related_work_section: 'Related Work',
+    methods: 'Methods',
+    results: 'Results',
+    discussion: 'Discussion',
+    conclusion: 'Conclusion',
+    references: 'References',
+  };
+  return labels[section] || section;
+}
+
+// HTML attribute escape — same idea as escapeHtml but for inline attrs where
+// quotes would break out of the attribute value.
+function escapeAttr(str) {
+  return String(str ?? '').replace(/[&"<>]/g, (c) =>
+    ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c]
+  );
 }
 
 function formatTime(isoStr) {

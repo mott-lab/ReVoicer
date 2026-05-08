@@ -59,17 +59,21 @@ The right pane shows all annotations for the current PDF in one of four
 modes:
 
 - **By Page Order** — chronological, grouped by page number
-- **By Type** — grouped by comment type
-- **By Section** — LLM infers paper sections (Introduction, Methods, …)
+- **By Type** — grouped by comment tag (a multi-tagged note appears under each
+  of its tags)
+- **By Section** — grouped by the paper section assigned at note creation
+  (Introduction, Methods, …)
 - **By Theme** — LLM groups by intellectual theme
 
 Click **Export MD** to download all annotations as a Markdown file.
 
 ### Comment Types
 
-The LLM auto-classifies each annotation:
+The LLM tags each annotation with one or more of these categories (most get a
+single tag; comments that span categories list each one) and identifies the
+paper section the passage is in:
 
-| Type         | Color  | Use case                                       |
+| Tag          | Color  | Use case                                       |
 |--------------|--------|------------------------------------------------|
 | Summary      | Blue   | Restating what the text says                   |
 | Critique     | Red    | Identifying weaknesses or disagreements        |
@@ -78,6 +82,10 @@ The LLM auto-classifies each annotation:
 | Related Work | Purple | Connecting to other papers or ideas            |
 | Suggestion   | Teal   | Proposing improvements or alternatives         |
 | Follow-up    | Yellow | Things to investigate later                    |
+
+The highlight color in the PDF tracks the primary (first) tag. To override it
+per-note, click the small color circle in the note's actions row and pick a
+different color (or **Reset** to revert to the tag color).
 
 ## Settings (`File → Settings…`, `Ctrl/Cmd+,`)
 
@@ -237,20 +245,3 @@ reproducibility):
 - **Structured review generation** — organize the review export by the
   rubric's categories rather than a generic format.
 
-## Issues to address
-
-- After clicking **Done** on a comment, the modal sometimes re-spawns
-  next to where the mouse was. It should only spawn on highlight; likely
-  a fix is to disable the click/highlight detector on submit.
-- The annotation modal currently appears in other web pages too when
-  text is highlighted; should be restrained to the PDF.
-
-## Other ideas
-
-- Rework the comment-type deduction — switch to multi-tag classification
-  since comments often span categories. Also include section context
-  (methods, background, etc.) as part of the tag set.
-- Default to a yellow highlight but let users change the color via a
-  small color icon on each note in the panel.
-- The "Ask" feature feels under-developed for this version — consider
-  hiding it from the UI while keeping the codepath, to revisit later.

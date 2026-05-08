@@ -184,6 +184,83 @@ body {
 .note-type-suggestion  { background: #e0f7fa; color: #00695c; }
 .note-type-follow_up   { background: #fff8e1; color: #f57f17; }
 
+/* Section pill — sits next to the type badges. Greyscale on purpose so the
+   colored type badges stay the dominant visual cue. */
+.note-section-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: #eceff1;
+  color: #455a64;
+  border: 1px solid #cfd8dc;
+}
+
+/* Per-note color swatch button + inline picker. */
+.note-color {
+  width: 18px;
+  height: 18px;
+  padding: 0 !important;
+  border: 1px solid #ccc !important;
+  border-radius: 50% !important;
+  background: transparent;
+  font-size: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+.note-color::before {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 3px auto;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ffee58, #42a5f5);
+}
+.note-color[style*="background"]::before {
+  display: none;
+}
+
+.note-color-picker {
+  position: fixed;
+  z-index: 10000;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  align-items: center;
+}
+.note-color-swatch {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #999;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+.note-color-swatch:hover {
+  transform: scale(1.1);
+}
+.note-color-reset {
+  margin-left: 4px;
+  padding: 3px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f5f5f5;
+  font-size: 11px;
+  cursor: pointer;
+  color: #666;
+}
+.note-color-reset:hover {
+  background: #eee;
+}
+
 .note-highlight {
   margin: 6px 0;
   padding: 6px 10px;

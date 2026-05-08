@@ -16,16 +16,36 @@ const { transcribeAudio } = require('./services/transcribe-service');
 const { getSettingsStore } = require('./services/settings-store');
 
 // Heuristic fallback used when the user has globally disabled LLM cleanup.
-// Mirrors the categories defined in cleanup-service VALID_TYPES.
-function inferCommentType(text) {
+// Mirrors the categories defined in cleanup-service VALID_TAGS. Returns a
+// single-element tag array for parity with the LLM path.
+function inferCommentTags(text) {
   const lower = (text || '').toLowerCase();
-  if (lower.includes('?')) return 'question';
-  if (lower.includes('weak') || lower.includes('issue') || lower.includes('problem')) return 'critique';
-  if (lower.includes('strong') || lower.includes('good') || lower.includes('nice')) return 'strength';
-  if (lower.includes('todo') || lower.includes('follow up') || lower.includes('check')) return 'follow_up';
-  if (lower.includes('related') || lower.includes('cf.') || lower.includes('see also')) return 'related_work';
-  if (lower.includes('suggest')) return 'suggestion';
-  return 'summary';
+  if (lower.includes('?')) return ['question'];
+  if (lower.includes('weak') || lower.includes('issue') || lower.includes('problem')) return ['critique'];
+  if (lower.includes('strong') || lower.includes('good') || lower.includes('nice')) return ['strength'];
+  if (lower.includes('todo') || lower.includes('follow up') || lower.includes('check')) return ['follow_up'];
+  if (lower.includes('related') || lower.includes('cf.') || lower.includes('see also')) return ['related_work'];
+  if (lower.includes('suggest')) return ['suggestion'];
+  return ['summary'];
+}
+
+// Build a small context snippet for the cleanup LLM: the current page text plus
+// the previous page (often where the section heading lives). Capped so we
+// don't blow past the model's cheap-token budget.
+async function buildPageContext(pdfIdentifier, pageNumber) {
+  if (!pdfIdentifier || !pageNumber || pageNumber < 1) return '';
+  try {
+    const pages = await getDocumentStore().loadDocumentText(pdfIdentifier);
+    if (!pages) return '';
+    const parts = [];
+    const prev = pages[String(pageNumber - 1)];
+    if (prev) parts.push(`[Page ${pageNumber - 1}]\n${prev.slice(-1500)}`);
+    const cur = pages[String(pageNumber)];
+    if (cur) parts.push(`[Page ${pageNumber}]\n${cur.slice(0, 3000)}`);
+    return parts.join('\n\n');
+  } catch {
+    return '';
+  }
 }
 
 const routes = {
@@ -41,17 +61,27 @@ const routes = {
   'POST /api/notes/': async ({ body }) => {
     const { cleanup_enabled } = getSettingsStore().get();
     const skipRewrite = body.skip_cleanup || !cleanup_enabled;
+    const pageContext = cleanup_enabled
+      ? await buildPageContext(body.pdf_identifier, body.page_number)
+      : '';
     let cleaned;
-    let commentType;
+    let commentTags;
+    let section;
     if (skipRewrite) {
       cleaned = body.raw_transcript || '';
-      commentType = cleanup_enabled
-        ? await classifyCommentType(body.selected_text || '', body.raw_transcript || '')
-        : inferCommentType(body.raw_transcript);
+      if (cleanup_enabled) {
+        const r = await classifyCommentType(body.selected_text || '', body.raw_transcript || '', pageContext);
+        commentTags = r.tags;
+        section = r.section;
+      } else {
+        commentTags = inferCommentTags(body.raw_transcript);
+        section = null;
+      }
     } else {
-      const result = await cleanupTranscript(body.selected_text || '', body.raw_transcript || '');
+      const result = await cleanupTranscript(body.selected_text || '', body.raw_transcript || '', pageContext);
       cleaned = result.comment;
-      commentType = result.type;
+      commentTags = result.tags;
+      section = result.section;
     }
 
     return getNoteStore().createNote({
@@ -62,7 +92,8 @@ const routes = {
       pageNumber: body.page_number || 0,
       rawTranscript: body.raw_transcript || '',
       cleanedComment: cleaned,
-      commentType,
+      commentTags,
+      section,
       highlightData: body.highlight_data || null,
     });
   },
@@ -77,11 +108,44 @@ const routes = {
     const store = getNoteStore();
     const note = await store.getNote(query.pdf_identifier, params.id);
     if (!note) return { __status: 404, error: 'Note not found' };
-    const { comment, type } = await cleanupTranscript(note.selected_text || '', note.raw_transcript || '');
+    const pageContext = await buildPageContext(query.pdf_identifier, note.page_number);
+    const { comment, tags, section } = await cleanupTranscript(
+      note.selected_text || '',
+      note.raw_transcript || '',
+      pageContext,
+    );
     return store.updateNote(query.pdf_identifier, params.id, {
       cleaned_comment: comment,
-      comment_type: type,
+      comment_tags: tags,
+      section,
     });
+  },
+
+  'PUT /api/notes/:id': async ({ params, query, body }) => {
+    const store = getNoteStore();
+    const updates = {};
+    if (Array.isArray(body?.comment_tags)) {
+      const filtered = body.comment_tags.filter(
+        (t) => typeof t === 'string' && /^[a-z_]+$/.test(t),
+      );
+      if (filtered.length > 0) updates.comment_tags = filtered.slice(0, 3);
+    }
+    if ('section' in (body || {})) {
+      updates.section = body.section || null;
+    }
+    if ('color_override' in (body || {})) {
+      const c = body.color_override;
+      // Allow null (reset) or a #RRGGBB hex.
+      if (c === null || (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c))) {
+        updates.color_override = c;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return { __status: 400, error: 'No valid fields to update' };
+    }
+    const updated = await store.updateNote(query.pdf_identifier, params.id, updates);
+    if (!updated) return { __status: 404, error: 'Note not found' };
+    return updated;
   },
 
   // ─── Export ────────────────────────────────────────────────────────────

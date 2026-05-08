@@ -10,8 +10,20 @@
 //     "pdf_title": string | null,
 //     "pdf_url": string | null,
 //     "notes": [ { id, selected_text, page_number, raw_transcript,
-//                  cleaned_comment, comment_type, highlight_data, created_at } ]
+//                  cleaned_comment, comment_type, comment_tags, section,
+//                  color_override, highlight_data, created_at } ]
 //   }
+//
+// Schema notes:
+// - `comment_tags`: array of 1-3 tag strings (summary/critique/strength/...).
+//   Multi-tag classification — comments that span categories list each tag.
+// - `comment_type`: kept for back-compat. Always equals `comment_tags[0]`
+//   (the primary tag) on writes. Older note files without comment_tags get
+//   `comment_tags = [comment_type]` injected on read.
+// - `section`: paper section the passage is in
+//   (introduction/methods/results/...) or null.
+// - `color_override`: user-picked hex color (e.g. "#ffee58") or null. When
+//   null, highlight color is derived from the primary tag.
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -80,26 +92,38 @@ class NoteStore {
   }
 
   // Inject pdf_identifier and pdf_title into each note for parity with the
-  // Python list_notes response shape.
+  // Python list_notes response shape. Also backfill new schema fields for
+  // notes written before they existed, so renderers can rely on them.
   _decorate(notes, contentHash, pdfTitle) {
     for (const n of notes) {
       n.pdf_identifier = contentHash;
       n.pdf_title = pdfTitle;
+      if (!Array.isArray(n.comment_tags)) {
+        n.comment_tags = n.comment_type ? [n.comment_type] : ['summary'];
+      }
+      if (!('section' in n)) n.section = null;
+      if (!('color_override' in n)) n.color_override = null;
     }
     return notes;
   }
 
   async createNote({
     contentHash, pdfTitle, pdfUrl, selectedText, pageNumber,
-    rawTranscript, cleanedComment, commentType, highlightData,
+    rawTranscript, cleanedComment, commentTags, section, highlightData,
   }) {
+    const tags = Array.isArray(commentTags) && commentTags.length > 0
+      ? commentTags
+      : ['summary'];
     const note = {
       id: randomUUID(),
       selected_text: selectedText || '',
       page_number: pageNumber || 0,
       raw_transcript: rawTranscript || '',
       cleaned_comment: cleanedComment || '',
-      comment_type: commentType || 'summary',
+      comment_tags: tags,
+      comment_type: tags[0],
+      section: section || null,
+      color_override: null,
       highlight_data: highlightData || null,
       created_at: new Date().toISOString(),
     };
@@ -130,7 +154,8 @@ class NoteStore {
     const data = await this._readFile(contentHash);
     const note = data.notes.find((n) => n.id === noteId);
     if (!note) return null;
-    return { ...note, pdf_identifier: contentHash, pdf_title: data.pdf_title };
+    const [decorated] = this._decorate([{ ...note }], contentHash, data.pdf_title);
+    return decorated;
   }
 
   async deleteNote(contentHash, noteId) {
@@ -150,8 +175,14 @@ class NoteStore {
       const note = data.notes.find((n) => n.id === noteId);
       if (!note) return null;
       Object.assign(note, updates);
+      // Keep comment_type mirrored as the primary tag whenever comment_tags
+      // changes — legacy renderers and CSS classes still read comment_type.
+      if (Array.isArray(note.comment_tags) && note.comment_tags.length > 0) {
+        note.comment_type = note.comment_tags[0];
+      }
       await this._writeFile(contentHash, data);
-      return { ...note, pdf_identifier: contentHash, pdf_title: data.pdf_title };
+      const [decorated] = this._decorate([{ ...note }], contentHash, data.pdf_title);
+      return decorated;
     });
   }
 }
