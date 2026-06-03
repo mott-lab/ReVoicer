@@ -145,6 +145,18 @@ async function testAnthropic({ apiKey, model }) {
   const t0 = Date.now();
   try {
     const client = _anthropicClientFor(apiKey);
+    // Prefer listing models (also verifies auth) so the Settings UI can surface
+    // them. Fall back to a minimal 1-token request for SDKs/keys without
+    // models.list access.
+    if (client.models && typeof client.models.list === 'function') {
+      try {
+        const list = await client.models.list();
+        const models = (list.data || []).map((m) => m.id).sort();
+        if (models.length) {
+          return { ok: true, message: `${models.length} models available`, latencyMs: Date.now() - t0, models };
+        }
+      } catch { /* fall through to the auth check */ }
+    }
     // Minimal 1-token request — cheaper than a models list and verifies auth.
     await client.messages.create({
       model: model || 'claude-haiku-4-5-20251001',

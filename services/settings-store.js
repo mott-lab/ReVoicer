@@ -39,6 +39,15 @@ const DEFAULTS = {
   openai_compat_base_url: '',
   openai_compat_api_key: '',
   openai_compat_model: '',
+
+  // Optional Semantic Scholar API key for in-text citation lookups. Empty is
+  // fine — the keyless pool works at low volume, a key just raises rate limits.
+  semantic_scholar_api_key: '',
+
+  // Highlight appearance. false (default) → every highlight uses a flat yellow
+  // background; true → highlights are colored by the note's primary tag. Per-note
+  // color overrides (swatch picker / clicking a tag badge) win over both.
+  auto_color_highlights: false,
 };
 
 // Migrate the older flat shape from phase 3b/3a where `llm_provider` was the

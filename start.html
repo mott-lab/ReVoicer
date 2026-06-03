@@ -16,8 +16,10 @@
     }
     .start {
       text-align: center;
-      max-width: 480px;
+      max-width: 520px;
       padding: 32px;
+      width: 100%;
+      box-sizing: border-box;
     }
     h1 {
       font-weight: 500;
@@ -43,6 +45,62 @@
       border-radius: 3px;
       font-size: 12px;
     }
+    .recent {
+      margin-top: 36px;
+      text-align: left;
+    }
+    .recent-header {
+      font-size: 12px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #333;
+    }
+    .recent-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .recent-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 8px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .recent-item:hover {
+      background: #2a2a2a;
+    }
+    .recent-name {
+      display: block;
+      color: #e0e0e0;
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .recent-dir {
+      display: block;
+      color: #777;
+      font-size: 11px;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .recent-empty {
+      color: #666;
+      font-size: 13px;
+      font-style: italic;
+      padding: 4px 0;
+    }
   </style>
 </head>
 <body>
@@ -51,11 +109,65 @@
     <p>Open a PDF to start annotating.</p>
     <button id="open">Open PDF…</button>
     <p style="margin-top: 16px; font-size: 12px;">or press <kbd>Ctrl</kbd>+<kbd>O</kbd></p>
+
+    <div class="recent" id="recent" hidden>
+      <div class="recent-header">Open Recent</div>
+      <ul class="recent-list" id="recent-list"></ul>
+    </div>
   </div>
   <script>
     document.getElementById('open').addEventListener('click', () => {
       window.desktop.openPdfDialog();
     });
+
+    // Show up to 5 most recently opened PDFs. Each entry triggers loadPdf in
+    // the main process, which also re-asserts the move-to-front bookkeeping
+    // and surfaces an error if the file has since moved.
+    function basename(p) {
+      const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+      return i >= 0 ? p.slice(i + 1) : p;
+    }
+    function dirname(p) {
+      const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+      return i > 0 ? p.slice(0, i) : '';
+    }
+
+    async function renderRecent() {
+      let recent = [];
+      try {
+        recent = (await window.desktop.getRecentFiles()) || [];
+      } catch (err) {
+        console.error('Failed to load recent files:', err);
+        return;
+      }
+      const section = document.getElementById('recent');
+      const list = document.getElementById('recent-list');
+      if (!recent.length) {
+        section.hidden = true;
+        return;
+      }
+      section.hidden = false;
+      list.innerHTML = '';
+      for (const absPath of recent.slice(0, 5)) {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.className = 'recent-item';
+        btn.title = absPath;
+        const name = document.createElement('span');
+        name.className = 'recent-name';
+        name.textContent = basename(absPath);
+        const dir = document.createElement('span');
+        dir.className = 'recent-dir';
+        dir.textContent = dirname(absPath);
+        btn.appendChild(name);
+        btn.appendChild(dir);
+        btn.addEventListener('click', () => window.desktop.openPdfPath(absPath));
+        li.appendChild(btn);
+        list.appendChild(li);
+      }
+    }
+
+    renderRecent();
   </script>
 </body>
 </html>

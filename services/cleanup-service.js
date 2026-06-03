@@ -5,6 +5,7 @@ const { chat, parseJsonResponse } = require('./llm-service');
 const VALID_TAGS = new Set([
   'summary', 'critique', 'strength', 'question',
   'related_work', 'suggestion', 'follow_up',
+  'edit', 'presentation', 'novelty', 'technical', 'general',
 ]);
 
 // Section enum. `related_work_section` is the paper's "Related Work" heading;
@@ -24,7 +25,12 @@ const TAG_DESCRIPTIONS = `- summary: Restating or paraphrasing what the text say
 - question: Expressing confusion or asking something
 - related_work: Connecting to other papers, authors, or ideas
 - suggestion: Proposing an improvement or alternative approach
-- follow_up: Noting something to investigate later or apply elsewhere`;
+- follow_up: Noting something to investigate later or apply elsewhere
+- edit: A minor wording, typo, grammar, or copy-edit fix
+- presentation: Concerns the writing, structure, figures, or clarity of the paper
+- novelty: Concerns how new or original the contribution is
+- technical: Concerns correctness, soundness, or rigor of the method/results
+- general: A high-level or overall comment that doesn't fit the more specific tags`;
 
 const SECTION_DESCRIPTIONS = `- abstract, introduction, background, related_work_section,
   methods, results, discussion, conclusion, references, other`;
@@ -39,13 +45,37 @@ ${pageContext}
 ---`;
 }
 
-function cleanupSystemPrompt(selectedText, pageContext) {
+// Format the user-curated reference library for the cleanup prompt. The LLM
+// uses this to resolve loose mentions ("the Gottsacker paper", "see Smith
+// et al.") into the proper author/title/link the user wants in the cleaned
+// note.
+function referencesBlock(references) {
+  if (!Array.isArray(references) || references.length === 0) return '';
+  const lines = references
+    .filter((r) => (r.authors || r.title || r.link))
+    .map((r, i) => {
+      const parts = [];
+      if (r.authors) parts.push(r.authors);
+      if (r.title) parts.push(`"${r.title}"`);
+      if (r.link) parts.push(r.link);
+      return `${i + 1}. ${parts.join(' — ')}`;
+    });
+  if (lines.length === 0) return '';
+  return `
+
+The user has provided this reference library. If their transcript mentions any of these works (e.g. by an author surname like "Gottsacker et al." or a partial title), substitute the loose mention with a proper reference using the matching authors, title, and link below. Do not invent citations; only use entries from this list.
+---
+${lines.join('\n')}
+---`;
+}
+
+function cleanupSystemPrompt(selectedText, pageContext, references) {
   return `You are a research annotation assistant. Your job is to clean up a voice-recorded annotation about a passage in an academic paper, classify its type(s), and identify which section of the paper the passage is in.
 
 The user highlighted the following text from the paper:
 ---
 ${selectedText}
----${pageContextBlock(pageContext)}
+---${pageContextBlock(pageContext)}${referencesBlock(references)}
 
 They then spoke their annotation aloud. The raw speech transcript may contain:
 - Filler words (um, uh, like, you know)
@@ -54,7 +84,7 @@ They then spoke their annotation aloud. The raw speech transcript may contain:
 - Incomplete sentences
 
 Your task:
-1. Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not remove any substantive points they made. Just clean up the delivery.
+1. Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not remove any substantive points they made. Just clean up the delivery. When the transcript mentions a work that matches an entry in the reference library above, replace the loose mention with the proper author + title (and link in parentheses if available).
 
 2. Classify the comment with one or more tags from this list. Use multiple tags ONLY when the comment genuinely spans categories (e.g. a strength that also leads to a suggestion). Most comments need just one tag.
 ${TAG_DESCRIPTIONS}
@@ -69,13 +99,13 @@ Output ONLY valid JSON with exactly three fields:
 No other text. Just the JSON.`;
 }
 
-function classifySystemPrompt(selectedText, comment, pageContext) {
+function classifySystemPrompt(selectedText, comment, pageContext, references) {
   return `You are a research annotation assistant. Your job is to classify a typed annotation about a passage in an academic paper, and identify which section of the paper the passage is in.
 
 The user highlighted the following text from the paper:
 ---
 ${selectedText}
----${pageContextBlock(pageContext)}
+---${pageContextBlock(pageContext)}${referencesBlock(references)}
 
 They then wrote the following annotation:
 ---
@@ -120,9 +150,9 @@ function normalizeSection(rawSection) {
   return VALID_SECTIONS.has(s) ? s : null;
 }
 
-async function cleanupTranscript(selectedText, rawTranscript, pageContext) {
+async function cleanupTranscript(selectedText, rawTranscript, pageContext, references) {
   const content = await chat({
-    system: cleanupSystemPrompt(selectedText || '', pageContext || ''),
+    system: cleanupSystemPrompt(selectedText || '', pageContext || '', references || []),
     user: rawTranscript || '',
   });
   const parsed = parseJsonResponse(content);
@@ -134,9 +164,9 @@ async function cleanupTranscript(selectedText, rawTranscript, pageContext) {
   };
 }
 
-async function classifyCommentType(selectedText, comment, pageContext) {
+async function classifyCommentType(selectedText, comment, pageContext, references) {
   const content = await chat({
-    system: classifySystemPrompt(selectedText || '', comment || '', pageContext || ''),
+    system: classifySystemPrompt(selectedText || '', comment || '', pageContext || '', references || []),
     user: 'Classify the annotation above.',
   });
   const parsed = parseJsonResponse(content);

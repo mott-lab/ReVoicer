@@ -71,6 +71,32 @@
     /* Hide all provider-specific blocks; the active class makes one visible. */
     .provider-block { display: none; margin-top: 10px; }
     .provider-block.active { display: block; }
+
+    /* Expandable, scrollable list of models surfaced by a connection test.
+       Clicking a row fills the provider's Model field. */
+    .model-picker { margin-top: 8px; }
+    .model-picker-details { border: 1px solid #444; border-radius: 4px; background: #242424; }
+    .model-picker-details > summary {
+      cursor: pointer; padding: 6px 10px; font-size: 12px; color: #ccc;
+      list-style: none; user-select: none;
+    }
+    .model-picker-details > summary::-webkit-details-marker { display: none; }
+    .model-picker-details > summary::before { content: '▸ '; color: #888; }
+    .model-picker-details[open] > summary::before { content: '▾ '; color: #888; }
+    .model-picker-panel { padding: 0 8px 8px; }
+    .model-picker-filter { margin-bottom: 6px; }
+    .model-picker-list {
+      max-height: 160px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .model-row {
+      background: #242424; border: 1px solid transparent; color: #ddd;
+      text-align: left; padding: 4px 8px; border-radius: 3px; font-size: 12px;
+      cursor: pointer; font-family: inherit; word-break: break-all;
+    }
+    .model-row:hover { background: #303030; filter: none; }
+    .model-row.active { background: #1e3a5f; border-color: #2d7ff9; color: #fff; }
+    .model-picker-empty { color: #888; font-size: 12px; padding: 6px; }
   </style>
 </head>
 <body>
@@ -107,6 +133,7 @@
           <button class="small" data-test="openai">Test connection</button>
           <span class="test-result" id="test_openai"></span>
         </div>
+        <div class="model-picker" id="models_openai" hidden></div>
       </div>
 
       <!-- Anthropic -->
@@ -119,6 +146,7 @@
           <button class="small" data-test="anthropic">Test connection</button>
           <span class="test-result" id="test_anthropic"></span>
         </div>
+        <div class="model-picker" id="models_anthropic" hidden></div>
       </div>
 
       <!-- Ollama -->
@@ -130,7 +158,6 @@
           </div>
           <div>
             <label>Model</label>
-            <select id="ollama_model_select" style="display:none;"></select>
             <input id="ollama_model" type="text" placeholder="llama3.2">
           </div>
         </div>
@@ -138,7 +165,8 @@
           <button class="small" data-test="ollama">Test &amp; list models</button>
           <span class="test-result" id="test_ollama"></span>
         </div>
-        <div class="help">Local-only, no API key required. The Test button populates a model dropdown from your installed models.</div>
+        <div class="model-picker" id="models_ollama" hidden></div>
+        <div class="help">Local-only, no API key required. Test populates the expandable list below from your installed models.</div>
       </div>
 
       <!-- OpenAI-compatible -->
@@ -159,6 +187,7 @@
           <button class="small" data-test="openai_compat">Test connection</button>
           <span class="test-result" id="test_openai_compat"></span>
         </div>
+        <div class="model-picker" id="models_openai_compat" hidden></div>
         <div class="help">For Groq, OpenRouter, Together, LM Studio, vLLM, llama.cpp server, etc. Anything that speaks the OpenAI chat-completions protocol.</div>
       </div>
     </fieldset>
@@ -174,6 +203,24 @@
         <label><input type="radio" name="speech_provider" value="off"><span>Off</span></label>
       </div>
       <div class="help" id="speech_help"></div>
+    </fieldset>
+
+    <!-- ── Citations section ──────────────────────────────────────────── -->
+    <fieldset>
+      <legend>Reference Lookup</legend>
+      <label>Semantic Scholar API Key <span style="color:#666">(optional)</span></label>
+      <input id="semantic_scholar_api_key" type="password" placeholder="(leave blank to use the shared, rate-limited pool)">
+      <div class="help">Used when clicking an in-text citation to fetch its title, authors, and abstract. Lookups happen only on click and are cached per PDF. Without a key, requests use Semantic Scholar's shared pool, which is heavily rate-limited. Request a free key at <span style="color:#aaa">semanticscholar.org/product/api</span>.</div>
+    </fieldset>
+
+    <!-- ── Highlights section ─────────────────────────────────────────── -->
+    <fieldset>
+      <legend>Highlights</legend>
+      <label class="toggle">
+        <input type="checkbox" id="auto_color_highlights">
+        <span class="toggle-label">Auto-color highlights by annotation type</span>
+      </label>
+      <div class="help">When off, all highlights use a yellow background. When on, each highlight is colored by its primary tag. Click a tag on a note (or the color swatch) to recolor one highlight.</div>
     </fieldset>
 
     <div class="actions">
@@ -236,6 +283,10 @@
         openai_compat_base_url: $('openai_compat_base_url').value.trim(),
         openai_compat_api_key: $('openai_compat_api_key').value.trim(),
         openai_compat_model: $('openai_compat_model').value.trim(),
+
+        semantic_scholar_api_key: $('semantic_scholar_api_key').value.trim(),
+
+        auto_color_highlights: $('auto_color_highlights').checked,
       };
     }
 
@@ -257,6 +308,10 @@
       $('openai_compat_api_key').value = s.openai_compat_api_key || '';
       $('openai_compat_model').value = s.openai_compat_model || '';
 
+      $('semantic_scholar_api_key').value = s.semantic_scholar_api_key || '';
+
+      $('auto_color_highlights').checked = s.auto_color_highlights === true;
+
       syncTextProviderBlocks();
       syncSpeechHelp();
     }
@@ -275,22 +330,67 @@
       }
     }
 
-    function maybePopulateOllamaModels(result) {
-      if (!result.ok || !Array.isArray(result.models) || result.models.length === 0) return;
-      const sel = $('ollama_model_select');
-      const input = $('ollama_model');
-      sel.innerHTML = '';
-      for (const m of result.models) {
-        const opt = document.createElement('option');
-        opt.value = m;
-        opt.textContent = m;
-        sel.appendChild(opt);
+    // Each provider's Model field, filled when a model row is clicked.
+    const MODEL_INPUT = {
+      openai: 'openai_model',
+      openai_compat: 'openai_compat_model',
+      anthropic: 'anthropic_model',
+      ollama: 'ollama_model',
+    };
+
+    // After a successful Test, surface the returned model ids as an expandable,
+    // scrollable, filterable list. Clicking a model fills that provider's Model
+    // field. A failed test or a provider that returns no models hides it.
+    function renderModelPicker(provider, models) {
+      const container = $(`models_${provider}`);
+      if (!container) return;
+      if (!Array.isArray(models) || models.length === 0) {
+        container.hidden = true;
+        container.innerHTML = '';
+        return;
       }
-      // Preselect the current value if it's in the list.
-      if (result.models.includes(input.value)) sel.value = input.value;
-      sel.style.display = '';
-      input.style.display = 'none';
-      sel.onchange = () => { input.value = sel.value; };
+      const input = $(MODEL_INPUT[provider]);
+      container.hidden = false;
+      container.innerHTML = `
+        <details class="model-picker-details" open>
+          <summary>Available models (${models.length})</summary>
+          <div class="model-picker-panel">
+            <input type="text" class="model-picker-filter" placeholder="Filter models…">
+            <div class="model-picker-list"></div>
+          </div>
+        </details>`;
+
+      const list = container.querySelector('.model-picker-list');
+      const filter = container.querySelector('.model-picker-filter');
+
+      function renderRows() {
+        const q = filter.value.trim().toLowerCase();
+        const current = input ? input.value.trim() : '';
+        const matches = q ? models.filter((m) => m.toLowerCase().includes(q)) : models;
+        list.innerHTML = '';
+        if (matches.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'model-picker-empty';
+          empty.textContent = 'No matching models';
+          list.appendChild(empty);
+          return;
+        }
+        for (const m of matches) {
+          const row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'model-row' + (m === current ? ' active' : '');
+          row.textContent = m;
+          row.addEventListener('click', () => {
+            if (input) input.value = m;
+            list.querySelectorAll('.model-row').forEach((r) => r.classList.remove('active'));
+            row.classList.add('active');
+          });
+          list.appendChild(row);
+        }
+      }
+
+      filter.addEventListener('input', renderRows);
+      renderRows();
     }
 
     document.querySelectorAll('button[data-test]').forEach((btn) => {
@@ -302,7 +402,7 @@
         try {
           const result = await window.desktop.testConnection(provider, readForm());
           showResult(provider, result);
-          if (provider === 'ollama') maybePopulateOllamaModels(result);
+          renderModelPicker(provider, result.models);
         } catch (err) {
           showResult(provider, { ok: false, message: err.message || String(err) });
         } finally {

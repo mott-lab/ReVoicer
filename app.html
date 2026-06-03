@@ -41,7 +41,77 @@
       color: #333;
       font-size: 13px;
       border-left: 1px solid #ccc;
+      /* The pane itself scrolls when the list is taller than the viewport;
+         the header is pinned via position: sticky below so the tabs stay
+         visible while the list area scrolls. */
       overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    #sidebar-pane #app {
+      /* `flex: none` (i.e. 0 0 auto) keeps #app at intrinsic height so the
+         header + tabs anchor at the top of the side panel rather than the
+         flex column distributing extra space and visually centering empty
+         tab content. The parent #sidebar-pane handles vertical overflow
+         via overflow-y: auto so the list area still scrolls when it grows
+         past the panel height. */
+      flex: none;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    #sidebar-pane .sidebar-header {
+      flex: 0 0 auto;
+      background: #fafafa;
+      /* Stays pinned to the top of the side panel as the list area scrolls
+         beneath it. A subtle separator under the header keeps it visually
+         distinct from the scrolling content. */
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+    }
+    /* The header's last toolbar already has margin-bottom; double-spacing
+       at the separator looks loose, so collapse the toolbar's bottom
+       margin when it's the last visible child of the header. */
+    #sidebar-pane .sidebar-header .toolbar { margin-bottom: 0; }
+    #sidebar-pane .sidebar-content {
+      /* Scroll moved up to #sidebar-pane so the sticky header can pin
+         while the list scrolls. This container just lets its children
+         flow naturally from the top. */
+      flex: 0 0 auto;
+      display: block;
+    }
+    /* Defensive: pin tab content containers to the top with no top margin
+       so the empty-state text always reads as "anchored below the toolbar"
+       rather than floating in the middle of the panel. */
+    #sidebar-pane #notes-container,
+    #sidebar-pane #questions-container,
+    #sidebar-pane #references-container,
+    #sidebar-pane #rubric-container {
+      margin-top: 0;
+    }
+    /* Drag handle between the PDF pane and the sidebar. The visible strip is
+       narrow; the hit area extends a few pixels on each side via padding so
+       the cursor target isn't a pixel-perfect ask. */
+    #pane-resizer {
+      flex: 0 0 5px;
+      cursor: col-resize;
+      background: #ccc;
+      position: relative;
+      z-index: 5;
+      user-select: none;
+    }
+    #pane-resizer:hover,
+    #pane-resizer.dragging {
+      background: #4285f4;
+    }
+    body.resizing-panes,
+    body.resizing-panes * {
+      cursor: col-resize !important;
+      user-select: none !important;
     }
     /* The split-pane sidebar is a column inside the window, not the whole
        page, so reset margins/paddings the original CSS gave to the
@@ -73,46 +143,133 @@
     <div id="viewer-container">
       <div id="pages"></div>
     </div>
+    <!-- In-PDF find bar (ctrl+f). Hidden by default; viewer.js shows/hides it. -->
+    <div id="find-bar" hidden>
+      <input id="find-input" type="text" placeholder="Find in PDF" autocomplete="off" spellcheck="false">
+      <span id="find-count" class="find-count">0/0</span>
+      <button id="find-prev" title="Previous match (Shift+Enter)">&uarr;</button>
+      <button id="find-next" title="Next match (Enter)">&darr;</button>
+      <button id="find-close" title="Close (Esc)">&times;</button>
+    </div>
   </div>
+
+  <!-- ─── Drag handle to resize the sidebar pane ────────────────────────── -->
+  <div id="pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
 
   <!-- ─── Right pane: notes / Q&A sidebar ───────────────────────────────── -->
   <aside id="sidebar-pane">
     <div id="app">
-      <div id="pdf-title" class="pdf-title">No PDF detected</div>
+      <div class="sidebar-header">
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="notes">Notes</button>
+          <button class="tab-btn" data-tab="questions">Questions</button>
+          <button class="tab-btn" data-tab="references">References</button>
+          <button class="tab-btn" data-tab="rubric">Rubric</button>
+        </div>
 
-      <div class="tab-bar">
-        <button class="tab-btn active" data-tab="notes">Notes</button>
-        <button class="tab-btn" data-tab="questions">Questions</button>
+        <div id="notes-toolbar" class="toolbar">
+          <select id="view-mode">
+            <option value="chronological">By Page Order</option>
+            <option value="by-type">By Type</option>
+            <option value="by-section">By Section</option>
+            <option value="by-theme">By Theme</option>
+          </select>
+          <button id="export-btn" class="toolbar-btn" title="Export as Markdown" style="display: none;">Export MD</button>
+          <button id="export-json-btn" class="toolbar-btn" title="Export as JSON">Export JSON</button>
+          <button id="check-review-btn" class="toolbar-btn" title="Check coverage against conference rubric">Check Review</button>
+        </div>
+
+        <div id="questions-toolbar" class="toolbar" style="display: none;">
+          <select id="questions-sort">
+            <option value="date">By Ask Date</option>
+            <option value="page">By Page Order</option>
+          </select>
+        </div>
+
+        <div id="references-toolbar" class="toolbar" style="display: none;">
+          <button id="add-reference-btn" class="toolbar-btn" title="Add a new reference">+ Add Reference</button>
+        </div>
+
+        <div id="rubric-toolbar" class="toolbar" style="display: none;">
+          <button id="add-rubric-btn" class="toolbar-btn" title="Add a new rubric section">+ Add Section</button>
+          <button id="paste-rubric-btn" class="toolbar-btn" title="Paste raw rubric text and let the LLM extract sections">Paste Rubric Text</button>
+          <select id="rubric-template-select" title="Load a saved rubric (e.g. a conference) into this paper">
+            <option value="">Load saved rubric…</option>
+          </select>
+          <button id="save-rubric-btn" class="toolbar-btn" title="Save the current rubric under a name for reuse">Save as…</button>
+        </div>
       </div>
 
-      <div id="notes-toolbar" class="toolbar">
-        <select id="view-mode">
-          <option value="chronological">By Page Order</option>
-          <option value="by-type">By Type</option>
-          <option value="by-section">By Section</option>
-          <option value="by-theme">By Theme</option>
-        </select>
-        <button id="export-btn" class="toolbar-btn" title="Export as Markdown">Export MD</button>
-      </div>
+      <div class="sidebar-content">
+        <div id="loading" class="loading" style="display: none;">
+          <div class="spinner"></div>
+          <span>Loading...</span>
+        </div>
 
-      <div id="questions-toolbar" class="toolbar" style="display: none;">
-        <select id="questions-sort">
-          <option value="date">By Ask Date</option>
-          <option value="page">By Page Order</option>
-        </select>
+        <div id="notes-container">
+          <p class="empty-state">No annotations yet. Highlight text in the PDF and click the microphone button to begin.</p>
+        </div>
+        <div id="questions-container" style="display: none;"></div>
+        <div id="references-container" style="display: none;"></div>
+        <div id="rubric-container" style="display: none;"></div>
       </div>
-
-      <div id="loading" class="loading" style="display: none;">
-        <div class="spinner"></div>
-        <span>Loading...</span>
-      </div>
-
-      <div id="notes-container">
-        <p class="empty-state">No annotations yet. Highlight text in the PDF and click the microphone button to begin.</p>
-      </div>
-      <div id="questions-container" style="display: none;"></div>
     </div>
   </aside>
+
+  <!-- Sidebar resize: drag the strip between panes to change sidebar width.
+       Width is persisted in localStorage so it survives reloads. -->
+  <script>
+    (function () {
+      const SIDEBAR_WIDTH_KEY = 'pdfConverser.sidebarWidth';
+      const MIN_WIDTH = 240;
+      const MIN_PDF_PANE_WIDTH = 320;
+      const sidebar = document.getElementById('sidebar-pane');
+      const resizer = document.getElementById('pane-resizer');
+      if (!sidebar || !resizer) return;
+
+      function applyWidth(px) {
+        const max = Math.max(MIN_WIDTH, window.innerWidth - MIN_PDF_PANE_WIDTH);
+        const clamped = Math.min(Math.max(px, MIN_WIDTH), max);
+        sidebar.style.flex = '0 0 ' + clamped + 'px';
+        sidebar.style.width = clamped + 'px';
+        return clamped;
+      }
+
+      const stored = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY), 10);
+      if (!Number.isNaN(stored)) applyWidth(stored);
+
+      let dragging = false;
+      resizer.addEventListener('mousedown', (e) => {
+        dragging = true;
+        resizer.classList.add('dragging');
+        document.body.classList.add('resizing-panes');
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        // Sidebar is anchored to the right edge of the window, so its width
+        // is the distance from the cursor to the right edge.
+        applyWidth(window.innerWidth - e.clientX);
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        resizer.classList.remove('dragging');
+        document.body.classList.remove('resizing-panes');
+        const w = parseInt(sidebar.style.width, 10);
+        if (!Number.isNaN(w)) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
+      });
+
+      // Re-clamp on window resize so a stored width wider than the new
+      // viewport doesn't squash the PDF pane to zero.
+      window.addEventListener('resize', () => {
+        const current = parseInt(sidebar.style.width, 10);
+        if (!Number.isNaN(current)) applyWidth(current);
+      });
+    })();
+  </script>
 
   <!-- Script load order matters: viewer.js (module) provides pdfjs and
        drives rendering; the lib scripts define the API client and helpers;

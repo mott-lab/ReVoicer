@@ -128,12 +128,21 @@ window.chrome.storage = Object.assign({}, window.chrome.storage, {
 window.desktop = {
   openPdfDialog: () => ipcRenderer.invoke('desktop:openPdfDialog'),
   openPdfPath: (absPath) => ipcRenderer.invoke('desktop:openPdfPath', absPath),
+  getRecentFiles: () => ipcRenderer.invoke('desktop:getRecentFiles'),
   openSettings: () => ipcRenderer.invoke('desktop:openSettings'),
   getSettings: () => ipcRenderer.invoke('desktop:getSettings'),
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
 };
+
+// The settings window lives in its own BrowserWindow; when settings are saved
+// there, main pings the main window so the PDF pane can re-render highlights
+// (e.g. the auto-color toggle). Relay it onto the same-page bus that content.js
+// already listens to.
+ipcRenderer.on('desktop:settingsChanged', () => {
+  dispatchMessage({ action: 'settingsChanged' }).catch(() => {});
+});
 
 // Toggle a CSS class on <html> when speech is off so the FAB's mic button
 // can be hidden purely via stylesheet (see app.html).

@@ -137,6 +137,78 @@ body {
   background: rgba(0, 100, 200, 0.3);
 }
 
+/* Find-in-PDF: text-layer spans get a translucent yellow background while
+   the find bar has matches. The active match uses a stronger orange so it
+   stands out from the surrounding hits. */
+.text-layer span.find-match {
+  background: rgba(255, 235, 59, 0.45);
+  border-radius: 1px;
+}
+.text-layer span.find-match-current {
+  background: rgba(255, 145, 0, 0.7);
+}
+
+/* Find bar — fixed inside #pdf-pane, top-right, beneath the toolbar. */
+#find-bar {
+  position: absolute;
+  top: 48px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: #323639;
+  color: #e0e0e0;
+  border: 1px solid #1e1e1e;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+#find-bar[hidden] {
+  display: none;
+}
+#find-input {
+  width: 200px;
+  background: #4a4d50;
+  border: 1px solid #5a5d60;
+  color: #e0e0e0;
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 13px;
+}
+#find-input:focus {
+  outline: none;
+  border-color: #4285f4;
+}
+#find-input.find-no-results {
+  background: #5a3a3a;
+  border-color: #c62828;
+}
+.find-count {
+  min-width: 44px;
+  text-align: center;
+  color: #aaa;
+  font-variant-numeric: tabular-nums;
+}
+#find-bar button {
+  background: #4a4d50;
+  border: none;
+  color: #e0e0e0;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+#find-bar button:hover {
+  background: #5a5d60;
+}
+#find-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Annotation layer — link rectangles only. Container is transparent and
    pointer-events:none so clicks pass through to the text layer for
    selection. Each link inside re-enables pointer-events for itself. */

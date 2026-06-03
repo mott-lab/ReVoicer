@@ -14,6 +14,15 @@ const { organizeNotes } = require('./services/organize-service');
 const { askQuestion } = require('./services/qa-service');
 const { transcribeAudio } = require('./services/transcribe-service');
 const { getSettingsStore } = require('./services/settings-store');
+const { checkReview, getSavedReviewCheck } = require('./services/review-check-service');
+const { getReviewCheckStore } = require('./services/review-check-store');
+const { getReferencesStore } = require('./services/references-store');
+const { getRubricStore } = require('./services/rubric-store');
+const { extractRubricItems } = require('./services/rubric-extract-service');
+const { getRubricTemplatesStore } = require('./services/rubric-templates-store');
+const { extractCitations } = require('./services/citation-extract-service');
+const { lookupCitation } = require('./services/scholar-lookup-service');
+const { getCitationsStore } = require('./services/citations-store');
 
 // Heuristic fallback used when the user has globally disabled LLM cleanup.
 // Mirrors the categories defined in cleanup-service VALID_TAGS. Returns a
@@ -64,13 +73,16 @@ const routes = {
     const pageContext = cleanup_enabled
       ? await buildPageContext(body.pdf_identifier, body.page_number)
       : '';
+    const references = cleanup_enabled
+      ? await getReferencesStore().listReferences(body.pdf_identifier)
+      : [];
     let cleaned;
     let commentTags;
     let section;
     if (skipRewrite) {
       cleaned = body.raw_transcript || '';
       if (cleanup_enabled) {
-        const r = await classifyCommentType(body.selected_text || '', body.raw_transcript || '', pageContext);
+        const r = await classifyCommentType(body.selected_text || '', body.raw_transcript || '', pageContext, references);
         commentTags = r.tags;
         section = r.section;
       } else {
@@ -78,7 +90,7 @@ const routes = {
         section = null;
       }
     } else {
-      const result = await cleanupTranscript(body.selected_text || '', body.raw_transcript || '', pageContext);
+      const result = await cleanupTranscript(body.selected_text || '', body.raw_transcript || '', pageContext, references);
       cleaned = result.comment;
       commentTags = result.tags;
       section = result.section;
@@ -109,10 +121,12 @@ const routes = {
     const note = await store.getNote(query.pdf_identifier, params.id);
     if (!note) return { __status: 404, error: 'Note not found' };
     const pageContext = await buildPageContext(query.pdf_identifier, note.page_number);
+    const references = await getReferencesStore().listReferences(query.pdf_identifier);
     const { comment, tags, section } = await cleanupTranscript(
       note.selected_text || '',
       note.raw_transcript || '',
       pageContext,
+      references,
     );
     return store.updateNote(query.pdf_identifier, params.id, {
       cleaned_comment: comment,
@@ -132,6 +146,9 @@ const routes = {
     }
     if ('section' in (body || {})) {
       updates.section = body.section || null;
+    }
+    if (typeof body?.cleaned_comment === 'string') {
+      updates.cleaned_comment = body.cleaned_comment;
     }
     if ('color_override' in (body || {})) {
       const c = body.color_override;
@@ -171,6 +188,19 @@ const routes = {
     return organizeNotes(query.pdf_identifier, 'theme');
   },
 
+  // ─── Review Check ──────────────────────────────────────────────────────
+
+  'GET /api/review-check/': async ({ query }) => {
+    return getSavedReviewCheck(query.pdf_identifier);
+  },
+
+  'POST /api/review-check/': async ({ body }) => {
+    return checkReview({
+      pdfIdentifier: body.pdf_identifier,
+      rubricText: body.rubric_text || '',
+    });
+  },
+
   // ─── Transcribe ────────────────────────────────────────────────────────
 
   'POST /api/transcribe': async ({ body }) => {
@@ -202,6 +232,160 @@ const routes = {
     if (!ok) return { __status: 404, error: 'Q&A entry not found' };
     return { ok: true };
   },
+
+  // ─── References ────────────────────────────────────────────────────────
+
+  'GET /api/references/': async ({ query }) => {
+    const references = await getReferencesStore().listReferences(query.pdf_identifier);
+    return { references, total: references.length };
+  },
+
+  'POST /api/references/': async ({ body }) => {
+    if (!body?.pdf_identifier) {
+      return { __status: 400, error: 'pdf_identifier is required' };
+    }
+    return getReferencesStore().createReference({
+      contentHash: body.pdf_identifier,
+      authors: body.authors || '',
+      title: body.title || '',
+      link: body.link || '',
+    });
+  },
+
+  'PUT /api/references/:id': async ({ params, query, body }) => {
+    const updates = {};
+    if (typeof body?.authors === 'string') updates.authors = body.authors;
+    if (typeof body?.title === 'string') updates.title = body.title;
+    if (typeof body?.link === 'string') updates.link = body.link;
+    if (Object.keys(updates).length === 0) {
+      return { __status: 400, error: 'No valid fields to update' };
+    }
+    const updated = await getReferencesStore().updateReference(query.pdf_identifier, params.id, updates);
+    if (!updated) return { __status: 404, error: 'Reference not found' };
+    return updated;
+  },
+
+  'DELETE /api/references/:id': async ({ params, query }) => {
+    const ok = await getReferencesStore().deleteReference(query.pdf_identifier, params.id);
+    if (!ok) return { __status: 404, error: 'Reference not found' };
+    return { ok: true };
+  },
+
+  // ─── Rubric ────────────────────────────────────────────────────────────
+
+  'GET /api/rubric/': async ({ query }) => {
+    const items = await getRubricStore().listItems(query.pdf_identifier);
+    return { items, total: items.length };
+  },
+
+  'POST /api/rubric/': async ({ body }) => {
+    if (!body?.pdf_identifier) {
+      return { __status: 400, error: 'pdf_identifier is required' };
+    }
+    return getRubricStore().createItem({
+      contentHash: body.pdf_identifier,
+      section: body.section || '',
+      description: body.description || '',
+    });
+  },
+
+  // Extract rubric items from pasted text via the LLM and append each as a
+  // new entry in the rubric store. Returns the list of created items so the
+  // sidebar can refresh and the user can edit them in place.
+  'POST /api/rubric/parse': async ({ body }) => {
+    if (!body?.pdf_identifier) {
+      return { __status: 400, error: 'pdf_identifier is required' };
+    }
+    const { items, parse_error } = await extractRubricItems({
+      rubricText: body.rubric_text || '',
+    });
+    const store = getRubricStore();
+    const created = [];
+    for (const it of items) {
+      // Sequential insert keeps the per-PDF lock simple — each createItem
+      // takes the lock, writes, releases. Item count is small enough that
+      // serial inserts are not a perf concern.
+      const item = await store.createItem({
+        contentHash: body.pdf_identifier,
+        section: it.section,
+        description: it.description,
+      });
+      created.push(item);
+    }
+    return { items: created, parse_error: !!parse_error };
+  },
+
+  'PUT /api/rubric/:id': async ({ params, query, body }) => {
+    const updates = {};
+    if (typeof body?.section === 'string') updates.section = body.section;
+    if (typeof body?.description === 'string') updates.description = body.description;
+    if (Object.keys(updates).length === 0) {
+      return { __status: 400, error: 'No valid fields to update' };
+    }
+    const updated = await getRubricStore().updateItem(query.pdf_identifier, params.id, updates);
+    if (!updated) return { __status: 404, error: 'Rubric item not found' };
+    return updated;
+  },
+
+  'DELETE /api/rubric/:id': async ({ params, query }) => {
+    const ok = await getRubricStore().deleteItem(query.pdf_identifier, params.id);
+    if (!ok) return { __status: 404, error: 'Rubric item not found' };
+    return { ok: true };
+  },
+
+  // ─── Rubric templates (named, reusable rubrics) ─────────────────────────
+
+  'GET /api/rubric-templates/': async () => {
+    const templates = await getRubricTemplatesStore().list();
+    return {
+      templates: templates.map((t) => ({
+        id: t.id,
+        name: t.name,
+        item_count: (t.items || []).length,
+        updated_at: t.updated_at,
+      })),
+    };
+  },
+
+  // Save (upsert by name) the supplied rubric items under a name.
+  'POST /api/rubric-templates/': async ({ body }) => {
+    if (!body?.name || !String(body.name).trim()) {
+      return { __status: 400, error: 'name is required' };
+    }
+    return getRubricTemplatesStore().save({ name: body.name, items: body.items || [] });
+  },
+
+  // Apply a saved template to a PDF: replace that PDF's rubric with the
+  // template's items. Returns the new rubric items.
+  'POST /api/rubric-templates/apply': async ({ body }) => {
+    if (!body?.pdf_identifier || !body?.template_id) {
+      return { __status: 400, error: 'pdf_identifier and template_id are required' };
+    }
+    const tpl = await getRubricTemplatesStore().getById(body.template_id);
+    if (!tpl) return { __status: 404, error: 'Rubric template not found' };
+    const items = await getRubricStore().replaceItems(body.pdf_identifier, tpl.items || []);
+    return { items };
+  },
+
+  // ─── Citations ─────────────────────────────────────────────────────────
+
+  // Parse + cache the numbered reference list. Returns the set of available
+  // reference numbers so the renderer knows which in-text "[N]" to make
+  // clickable.
+  'POST /api/citations/extract': async ({ body }) => {
+    if (!body?.pdf_identifier) {
+      return { __status: 400, error: 'pdf_identifier is required' };
+    }
+    return extractCitations({ pdfIdentifier: body.pdf_identifier });
+  },
+
+  // Look up one reference's metadata (cached per number after the first call).
+  'POST /api/citations/lookup': async ({ body }) => {
+    if (!body?.pdf_identifier || body.number == null) {
+      return { __status: 400, error: 'pdf_identifier and number are required' };
+    }
+    return lookupCitation({ pdfIdentifier: body.pdf_identifier, number: body.number });
+  },
 };
 
 function matchRoute(method, pathname) {
@@ -226,6 +410,11 @@ function initialize({ notesDir }) {
   getNoteStore(notesDir);
   getDocumentStore(notesDir);
   getQAStore(notesDir);
+  getReviewCheckStore(notesDir);
+  getReferencesStore(notesDir);
+  getRubricStore(notesDir);
+  getRubricTemplatesStore(notesDir);
+  getCitationsStore(notesDir);
   _initialized = true;
 }
 

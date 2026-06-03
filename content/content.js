@@ -17,6 +17,34 @@ let askMode = false;
 // the FAB next to the cursor.
 let overlayActive = false;
 
+// Reference numbers found in the parsed bibliography. Only in-text "[N]" tokens
+// whose N is in this set are made clickable. Populated once the reference list
+// is extracted (on pdftextextracted).
+let citationNumbers = new Set();
+let citationPages = new Map(); // reference number -> page it appears on
+// Session cache keyed by "pdfId:number" -> resolved lookup result or the
+// in-flight promise. Dedupes concurrent clicks and avoids re-requesting within
+// a session; the backend also persists results across restarts.
+const citationLookups = new Map();
+let citationModalEl = null;
+let citationEscHandler = null;
+let citationNav = null; // { nums: number[], index } when a bracket has multiple refs
+
+// Highlight coloring. `autoColorHighlights` mirrors the auto_color_highlights
+// setting; when false (default) un-overridden highlights use the flat default
+// color below, when true they're colored by the note's primary tag.
+const DEFAULT_HIGHLIGHT_COLOR = '#ffee58';
+let autoColorHighlights = false;
+
+async function refreshHighlightSettings() {
+  try {
+    const s = await window.desktop?.getSettings?.();
+    autoColorHighlights = s?.auto_color_highlights === true;
+  } catch {
+    autoColorHighlights = false;
+  }
+}
+
 // True when the configured speech provider produces the final transcript on
 // the client (Vosk in the desktop build) — in that case we skip the
 // /api/transcribe round-trip and use the live transcript directly.
@@ -32,17 +60,35 @@ async function shouldSkipServerTranscribe() {
 // Initialize
 (async () => {
   await apiClient.init();
-  // Load existing highlights once pages start rendering
+  await refreshHighlightSettings();
+  // Load existing highlights once pages start rendering, and (re-)tag in-text
+  // citations on the page — text-layer spans are rebuilt on every zoom/render.
   document.addEventListener('pdfpagerendered', (e) => {
     renderHighlightsForPage(e.detail.pageNum);
+    renderCitationMarkersOnPage(e.detail.pageNum);
   });
-  // Upload document text when extraction completes
-  document.addEventListener('pdftextextracted', (e) => {
+  // Upload document text when extraction completes, then parse the reference
+  // list so in-text [N] citations become clickable.
+  document.addEventListener('pdftextextracted', async (e) => {
     const pdfId = getPdfIdentifier();
-    if (pdfId) {
-      apiClient.uploadDocumentText(pdfId, e.detail.pageTexts).catch(err => {
-        console.log('PDF Converser: Could not upload document text', err.message);
-      });
+    if (!pdfId) return;
+    try {
+      await apiClient.uploadDocumentText(pdfId, e.detail.pageTexts);
+    } catch (err) {
+      console.log('PDF Converser: Could not upload document text', err.message);
+    }
+    try {
+      const res = await apiClient.extractCitations(pdfId);
+      console.log(`PDF Converser: citations extracted — status=${res?.status}, count=${res?.count || 0}`);
+      if (res && Array.isArray(res.numbers) && res.numbers.length > 0) {
+        citationNumbers = new Set(res.numbers);
+        citationPages = new Map(
+          Object.entries(res.pages || {}).map(([n, p]) => [parseInt(n, 10), p]),
+        );
+        renderAllCitationMarkers();
+      }
+    } catch (err) {
+      console.log('PDF Converser: citation extraction failed', err.message);
     }
   });
   // Initial load of notes (delay to let pages render)
@@ -97,6 +143,21 @@ document.addEventListener('mousedown', (e) => {
   if (fab && !fab.contains(e.target)) {
     hideFab();
   }
+});
+
+// Click on a tagged in-text citation opens the reference popup. Ignored when
+// the user just finished selecting text (a drag), so selection still works.
+document.addEventListener('click', (e) => {
+  const target = e.target.closest?.('[data-citation-nums]');
+  if (!target) return;
+  const sel = window.getSelection();
+  if (sel && sel.toString().trim().length > 0) return;
+  e.preventDefault();
+  const nums = target.dataset.citationNums
+    .split(',')
+    .map((n) => parseInt(n, 10))
+    .filter((n) => Number.isFinite(n));
+  if (nums.length > 0) openCitationModal(nums);
 });
 
 // === Floating Action Button ===
@@ -156,9 +217,10 @@ function startRecording(selectedText) {
   askMode = false;
   showRecordingUI(selectedText);
 
-  speechCapture.onResult = (finalText, interimText) => {
-    updateRecordingTranscript(finalText + (interimText ? ' ' + interimText : ''));
-  };
+  // Live partials are intentionally not surfaced — the static "Listening…"
+  // indicator in the overlay is enough, and a moving transcript was
+  // distracting. speechCapture still accumulates `transcript` internally for
+  // the final submit (used when speech_provider === 'vosk').
 
   speechCapture.onEnd = async (transcript, audioBlob) => {
     hideRecordingUI();
@@ -250,11 +312,6 @@ function clearSelectionForSubmit() {
   // captureHighlightData(). It's cleared in hide*UI() below.
 }
 
-function updateRecordingTranscript(text) {
-  const el = document.getElementById('pcr-live-transcript');
-  if (el) el.textContent = text || 'Listening...';
-}
-
 function hideRecordingUI() {
   if (recordingOverlay) {
     recordingOverlay.remove();
@@ -303,6 +360,11 @@ function showTextInputUI(selectedText) {
 
   const textarea = document.getElementById('pcr-text-area');
   textarea.focus();
+  // Re-assert focus on the next frame in case a same-tick handler or layout
+  // pass dropped it as the overlay was inserted.
+  requestAnimationFrame(() => {
+    if (textInputOverlay && document.activeElement !== textarea) textarea.focus();
+  });
 
   textarea.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
@@ -563,6 +625,7 @@ async function loadAndRenderHighlights() {
   try {
     const data = await apiClient.getNotes(pdfId);
     cachedNotes = data.notes || [];
+    await refreshHighlightSettings();
     renderAllHighlights();
   } catch (err) {
     console.log('PDF Converser: Could not load highlights', err.message);
@@ -689,9 +752,15 @@ function renderNoteHighlight(note) {
 
     for (const rect of lines) {
       const highlight = document.createElement('div');
-      highlight.className = `pcr-highlight pcr-highlight-${primaryTag}`;
+      highlight.className = 'pcr-highlight';
       highlight.dataset.noteId = id;
-      if (colorOverride) highlight.style.background = colorOverride;
+      if (colorOverride) {
+        highlight.style.background = colorOverride;
+      } else if (autoColorHighlights) {
+        highlight.classList.add(`pcr-highlight-${primaryTag}`);
+      } else {
+        highlight.style.background = DEFAULT_HIGHLIGHT_COLOR;
+      }
       highlight.style.left = `${rect.left - pageRect.left}px`;
       highlight.style.top = `${rect.top - pageRect.top}px`;
       highlight.style.width = `${rect.width}px`;
@@ -734,6 +803,336 @@ function scrollToAndFlashHighlight(noteId) {
   }, 400);
 }
 
+// === In-Text Citations ===
+
+// Expand the text between brackets into individual numbers. Handles single
+// "12", lists "1, 2", and ranges "1-3" / "1–3".
+function parseCitationNumbers(inner) {
+  const nums = [];
+  for (const part of inner.split(',')) {
+    const piece = part.trim();
+    const range = piece.match(/^(\d{1,4})\s*[-–—−‐]\s*(\d{1,4})$/);
+    if (range) {
+      const lo = parseInt(range[1], 10);
+      const hi = parseInt(range[2], 10);
+      if (hi >= lo && hi - lo < 100) {
+        for (let n = lo; n <= hi; n++) nums.push(n);
+      }
+    } else {
+      const single = piece.match(/^(\d{1,4})$/);
+      if (single) nums.push(parseInt(single[1], 10));
+    }
+  }
+  return nums;
+}
+
+const CITATION_RE = /\[\s*(\d{1,4}(?:\s*[-–—−‐,]\s*\d{1,4})*)\s*\]/g;
+
+// getClientRects() returns one rect per pdf.js text span a Range crosses, so a
+// citation split across many spans (common in justified text) yields a row of
+// narrow rects. Merge rects that share a line into one bounding box so each line
+// of the citation renders as a single continuous marker (and a clean underline).
+function coalesceRectsByLine(rects) {
+  const sorted = Array.from(rects)
+    .filter((r) => r.width > 0 || r.height > 0)
+    .sort((a, b) => a.top - b.top || a.left - b.left);
+  const lines = [];
+  for (const r of sorted) {
+    const line = lines[lines.length - 1];
+    // Same visual line when the rect vertically overlaps the current line band.
+    if (line && r.top < line.bottom - 1 && r.bottom > line.top + 1) {
+      line.left = Math.min(line.left, r.left);
+      line.right = Math.max(line.right, r.right);
+      line.top = Math.min(line.top, r.top);
+      line.bottom = Math.max(line.bottom, r.bottom);
+    } else {
+      lines.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+  }
+  return lines;
+}
+
+// Draw clickable overlay markers over each in-text "[N]" citation whose number
+// exists in the parsed bibliography. Matches against the page's CONCATENATED
+// text-layer text (so a "[35]" split across pdf.js spans is still found), and
+// positions each marker by measuring each covered text-layer span on its own
+// (cross-span Ranges return stray rects over absolutely-positioned spans).
+// Rebuilt from scratch each render so zoom re-renders reposition correctly.
+function renderCitationMarkersOnPage(pageNum) {
+  const page = document.querySelector(`.pdf-page[data-page-number="${pageNum}"]`);
+  if (!page) return;
+  const existing = page.querySelector('.pcr-citation-layer');
+  if (existing) existing.remove();
+  if (citationNumbers.size === 0) return;
+  const textLayer = page.querySelector('.text-layer');
+  if (!textLayer) return;
+
+  // Concatenate span text nodes with no separators (so a split "[","35","]"
+  // rejoins to "[35]"), recording each node's offset range for Range building.
+  let fullText = '';
+  const segs = [];
+  for (const span of textLayer.querySelectorAll('span[data-index]')) {
+    const node = span.firstChild;
+    if (!node || node.nodeType !== Node.TEXT_NODE) continue;
+    const len = node.textContent.length;
+    if (len === 0) continue;
+    segs.push({ node, start: fullText.length, end: fullText.length + len });
+    fullText += node.textContent;
+  }
+  if (fullText.indexOf('[') === -1) return;
+
+  const pageRect = page.getBoundingClientRect();
+  let layer = null;
+  let m;
+  CITATION_RE.lastIndex = 0;
+  while ((m = CITATION_RE.exec(fullText)) !== null) {
+    const nums = parseCitationNumbers(m[1]).filter((n) => citationNumbers.has(n));
+    if (nums.length === 0) continue;
+    const mStart = m.index;
+    const mEnd = m.index + m[0].length;
+    // Measure each covered span on its own (a split citation spans several
+    // pdf.js spans). Per-span ranges avoid the stray, mis-positioned rects a
+    // single Range returns when it crosses absolutely-positioned spans — those
+    // were producing doubled underlines and narrow hover slivers.
+    const rects = [];
+    for (const s of segs) {
+      const from = Math.max(mStart, s.start);
+      const to = Math.min(mEnd, s.end);
+      if (from >= to) continue;
+      try {
+        const range = document.createRange();
+        range.setStart(s.node, from - s.start);
+        range.setEnd(s.node, to - s.start);
+        rects.push(range.getBoundingClientRect());
+      } catch {
+        /* skip unmeasurable span */
+      }
+    }
+    if (rects.length === 0) continue;
+    const lines = coalesceRectsByLine(rects);
+    if (lines.length === 0) continue;
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 'pcr-citation-layer';
+      page.appendChild(layer);
+    }
+    for (const r of lines) {
+      const marker = document.createElement('div');
+      marker.className = 'pcr-citation-marker';
+      marker.dataset.citationNums = nums.join(',');
+      marker.style.left = `${r.left - pageRect.left}px`;
+      marker.style.top = `${r.top - pageRect.top}px`;
+      marker.style.width = `${r.right - r.left}px`;
+      marker.style.height = `${r.bottom - r.top}px`;
+      layer.appendChild(marker);
+    }
+  }
+}
+
+function renderAllCitationMarkers() {
+  for (const page of document.querySelectorAll('.pdf-page[data-page-number]')) {
+    const pageNum = parseInt(page.dataset.pageNumber, 10);
+    if (pageNum) renderCitationMarkersOnPage(pageNum);
+  }
+}
+
+function openCitationModal(nums) {
+  hideCitationModal();
+  citationModalEl = document.createElement('div');
+  citationModalEl.className = 'review-modal-backdrop';
+  citationModalEl.id = 'pcr-citation-modal';
+  citationModalEl.innerHTML = `
+    <div class="review-modal" role="dialog" aria-modal="true">
+      <div class="review-modal-header">
+        <span id="pcr-citation-title">Reference</span>
+        <button class="review-modal-close" title="Close">&times;</button>
+      </div>
+      <div class="pcr-citation-nav" id="pcr-citation-nav"></div>
+      <div class="review-modal-body" id="pcr-citation-body"></div>
+      <div class="review-modal-footer" id="pcr-citation-footer"></div>
+    </div>
+  `;
+  document.body.appendChild(citationModalEl);
+
+  citationModalEl.querySelector('.review-modal-close').addEventListener('click', hideCitationModal);
+  citationModalEl.addEventListener('click', (e) => {
+    if (e.target === citationModalEl) hideCitationModal();
+  });
+  citationEscHandler = (e) => { if (e.key === 'Escape') hideCitationModal(); };
+  document.addEventListener('keydown', citationEscHandler);
+
+  // Default to the first reference; the nav bar lets the user move between the
+  // others when a bracket lists several (e.g. "[1, 2, 3]").
+  citationNav = { nums, index: 0 };
+  showCitationAt(0);
+}
+
+function hideCitationModal() {
+  if (citationModalEl) { citationModalEl.remove(); citationModalEl = null; }
+  if (citationEscHandler) {
+    document.removeEventListener('keydown', citationEscHandler);
+    citationEscHandler = null;
+  }
+  citationNav = null;
+}
+
+// Show the reference at `index` within the current bracket's number list and
+// refresh the navigation bar.
+function showCitationAt(index) {
+  if (!citationNav) return;
+  citationNav.index = index;
+  renderCitationNav();
+  loadCitation(citationNav.nums[index]);
+}
+
+// Prev/next arrows + a pill per reference number, shown only when a bracket
+// lists more than one reference.
+function renderCitationNav() {
+  if (!citationModalEl || !citationNav) return;
+  const nav = citationModalEl.querySelector('#pcr-citation-nav');
+  if (!nav) return;
+  const { nums, index } = citationNav;
+  if (nums.length <= 1) {
+    nav.style.display = 'none';
+    nav.innerHTML = '';
+    return;
+  }
+  nav.style.display = '';
+  nav.innerHTML = `
+    <button class="pcr-cite-arrow" data-nav="prev" ${index === 0 ? 'disabled' : ''} title="Previous reference">&lsaquo;</button>
+    <div class="pcr-cite-pills">
+      ${nums.map((n, i) => `<button class="pcr-cite-pill${i === index ? ' active' : ''}" data-idx="${i}">[${n}]</button>`).join('')}
+    </div>
+    <button class="pcr-cite-arrow" data-nav="next" ${index === nums.length - 1 ? 'disabled' : ''} title="Next reference">&rsaquo;</button>`;
+  nav.querySelector('[data-nav="prev"]').addEventListener('click', () => { if (index > 0) showCitationAt(index - 1); });
+  nav.querySelector('[data-nav="next"]').addEventListener('click', () => { if (index < nums.length - 1) showCitationAt(index + 1); });
+  nav.querySelectorAll('.pcr-cite-pill').forEach((b) => {
+    b.addEventListener('click', () => showCitationAt(parseInt(b.dataset.idx, 10)));
+  });
+}
+
+// Look up a reference's metadata at most once per session: return a cached
+// result, join an in-flight request for the same reference, or start a new one.
+// Successful / not-found results are cached client-side (the backend also
+// persists them); errors are not cached so the user can retry.
+function lookupCitationOnce(number) {
+  const pdfId = getPdfIdentifier();
+  const cacheKey = `${pdfId}:${number}`;
+  const hit = citationLookups.get(cacheKey);
+  if (hit) return Promise.resolve(hit);
+  const promise = apiClient.lookupCitation(pdfId, number)
+    .then((result) => {
+      if (result && result.status !== 'error') citationLookups.set(cacheKey, result);
+      else citationLookups.delete(cacheKey);
+      return result;
+    })
+    .catch((err) => {
+      citationLookups.delete(cacheKey);
+      return { status: 'error', number, message: err.message };
+    });
+  citationLookups.set(cacheKey, promise);
+  return promise;
+}
+
+async function loadCitation(number) {
+  const myModal = citationModalEl;
+  if (!myModal) return;
+  myModal.querySelector('#pcr-citation-title').textContent = `Reference [${number}]`;
+  myModal.querySelector('#pcr-citation-body').innerHTML =
+    '<div class="pcr-citation-loading"><span class="pcr-citation-spinner"></span> Looking up reference…</div>';
+  // Show the Jump-to-reference button right away — the page is known from
+  // extraction and doesn't depend on the (possibly slow) metadata lookup.
+  renderCitationFooter(number, null);
+
+  const result = await lookupCitationOnce(number);
+  // Ignore if the modal was closed, or the user navigated to a different
+  // reference (in a multi-ref bracket) while this lookup was in flight.
+  if (citationModalEl !== myModal) return;
+  if (citationNav && citationNav.nums[citationNav.index] !== number) return;
+  renderCitationResult(number, result);
+}
+
+function renderCitationResult(number, result) {
+  if (!citationModalEl) return;
+  const body = citationModalEl.querySelector('#pcr-citation-body');
+
+  if (result?.status === 'ok') {
+    const authors = (result.authors || []).join(', ');
+    const venueLine = [result.year, result.venue].filter(Boolean).join(' · ');
+    body.innerHTML = `
+      <h3 class="pcr-citation-paper-title">${escapeHtml(result.title || 'Untitled')}</h3>
+      ${authors ? `<p class="pcr-citation-meta">${escapeHtml(authors)}</p>` : ''}
+      ${venueLine ? `<p class="pcr-citation-meta">${escapeHtml(venueLine)}</p>` : ''}
+      ${result.abstract
+        ? `<p class="pcr-citation-abstract">${escapeHtml(result.abstract)}</p>`
+        : '<p class="pcr-citation-empty">No abstract available.</p>'}`;
+  } else if (result?.status === 'not_found') {
+    body.innerHTML = `
+      <p class="pcr-citation-empty">Couldn't match this reference on Semantic Scholar.</p>
+      ${result.raw ? `<p class="pcr-citation-raw">${escapeHtml(result.raw)}</p>` : ''}`;
+  } else {
+    body.innerHTML = `
+      <p class="pcr-citation-empty">Lookup failed${result?.message ? `: ${escapeHtml(result.message)}` : ''}.</p>
+      ${result?.raw ? `<p class="pcr-citation-raw">${escapeHtml(result.raw)}</p>` : ''}
+      <button class="toolbar-btn" id="pcr-citation-retry">Retry</button>`;
+  }
+
+  renderCitationFooter(number, result);
+  const retry = body.querySelector('#pcr-citation-retry');
+  if (retry) retry.addEventListener('click', () => loadCitation(number));
+}
+
+// Footer holds: Jump to reference (when the page is known), View paper, and a
+// Google Scholar search link. Re-rendered as the lookup state changes.
+function renderCitationFooter(number, result) {
+  if (!citationModalEl) return;
+  const footer = citationModalEl.querySelector('#pcr-citation-footer');
+  const btns = [];
+  const page = citationPages.get(number);
+  if (page) {
+    btns.push(`<button class="toolbar-btn" data-jump="${page}" data-jump-num="${number}">Jump to reference</button>`);
+  }
+  if (result?.url) {
+    btns.push(`<button class="toolbar-btn review-primary" data-open="${escapeHtml(result.url)}">View paper</button>`);
+  }
+  if (result?.google_scholar_url) {
+    btns.push(`<button class="toolbar-btn" data-open="${escapeHtml(result.google_scholar_url)}">Search Google Scholar</button>`);
+  }
+  footer.innerHTML = btns.join('');
+  footer.querySelectorAll('button[data-open]').forEach((btn) => {
+    btn.addEventListener('click', () => window.desktop?.openExternal?.(btn.dataset.open));
+  });
+  footer.querySelectorAll('button[data-jump]').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      jumpToReference(parseInt(btn.dataset.jumpNum, 10), parseInt(btn.dataset.jump, 10)));
+  });
+}
+
+// Scroll the PDF to the page holding reference [N] and flash its entry — the
+// in-modal equivalent of the PDF's built-in "jump to destination" link. Closes
+// the modal first so the destination is visible.
+function jumpToReference(number, page) {
+  hideCitationModal();
+  const pageEl = document.querySelector(`.pdf-page[data-page-number="${page}"]`);
+  if (!pageEl) return;
+  pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Once the page is in view its text layer exists; locate the "[N]" entry
+  // marker, scroll it to center, and flash it.
+  setTimeout(() => {
+    const textLayer = pageEl.querySelector('.text-layer');
+    if (!textLayer) return;
+    const marker = `[${number}]`;
+    let target = null;
+    for (const span of textLayer.querySelectorAll('span[data-index]')) {
+      if ((span.textContent || '').includes(marker)) { target = span; break; }
+    }
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('pcr-citation-flash');
+    target.addEventListener('animationend', () => target.classList.remove('pcr-citation-flash'), { once: true });
+  }, 350);
+}
+
 // === Toast Notifications ===
 
 function showToast(message, type = 'info') {
@@ -768,6 +1167,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Triggered by the sidebar after edits that affect the in-PDF highlight
   // (currently: per-note color override). Re-fetches notes and re-renders.
   if (message.action === 'notesChanged') {
+    loadAndRenderHighlights();
+  }
+  // Broadcast by the main process (relayed through preload) when settings are
+  // saved — re-render so the auto-color toggle takes effect immediately.
+  if (message.action === 'settingsChanged') {
     loadAndRenderHighlights();
   }
 });

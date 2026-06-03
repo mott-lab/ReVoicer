@@ -205,9 +205,18 @@ async function loadPdf(absolutePath) {
 
 ipcMain.handle('desktop:openPdfDialog', () => openPdfDialog());
 ipcMain.handle('desktop:openPdfPath', (_e, absPath) => loadPdf(absPath));
+ipcMain.handle('desktop:getRecentFiles', () => getRecentFiles().list());
 ipcMain.handle('desktop:openSettings', () => openSettingsWindow());
 ipcMain.handle('desktop:getSettings', () => getSettingsStore().get());
-ipcMain.handle('desktop:saveSettings', (_e, updates) => getSettingsStore().save(updates || {}));
+ipcMain.handle('desktop:saveSettings', async (_e, updates) => {
+  const result = await getSettingsStore().save(updates || {});
+  // Settings live in their own window; ping the main window so the PDF pane can
+  // re-render highlights (the auto-color toggle changes their colors).
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('desktop:settingsChanged');
+  }
+  return result;
+});
 ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
   const { testConnection } = require('./services/llm-service');
   return testConnection(provider, params || {});

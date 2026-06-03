@@ -53,7 +53,10 @@ if (!pdfUrl) {
       console.log('PDF Converser: content hash computed:', hash.substring(0, 12) + '...');
     }
   });
-  document.getElementById('pdf-title').textContent = decodeURIComponent(pdfUrl.split('/').pop().split('?')[0]);
+  // Old #pdf-title element in the side panel was removed. The window's
+  // document.title (set in loadPdf below) still carries the filename.
+  const titleEl = document.getElementById('pdf-title');
+  if (titleEl) titleEl.textContent = decodeURIComponent(pdfUrl.split('/').pop().split('?')[0]);
   loadPdf(pdfUrl);
 }
 
@@ -375,9 +378,177 @@ document.getElementById('viewer-container').addEventListener('scroll', () => {
   }
 });
 
+// Find in PDF ─────────────────────────────────────────────────────────────
+//
+// Walks the text-layer spans (already rendered by renderTextLayer) and
+// builds a concatenated string per page plus a span->range map. For a
+// query, indexOf scans the concatenated string and we mark every span whose
+// range overlaps a hit. The current match's spans get an extra class so
+// the active hit stands out and we can scrollIntoView on it.
+//
+// Highlights live on the text-layer spans themselves, which means zoom
+// rerenders wipe them — we re-run the find after each page renders.
+
+const findBar = document.getElementById('find-bar');
+const findInput = document.getElementById('find-input');
+const findCount = document.getElementById('find-count');
+const findPrev = document.getElementById('find-prev');
+const findNext = document.getElementById('find-next');
+const findClose = document.getElementById('find-close');
+
+let findQuery = '';
+let findMatches = [];
+let findCurrent = -1;
+
+function buildFindIndex() {
+  const pages = [];
+  for (let i = 0; i < pageDivs.length; i++) {
+    const spans = Array.from(pageDivs[i].querySelectorAll('.text-layer span'));
+    let text = '';
+    const ranges = [];
+    for (const span of spans) {
+      const t = span.textContent;
+      const start = text.length;
+      text += t;
+      ranges.push({ start, end: text.length, span });
+      // Pad with a space so adjacent spans don't accidentally form
+      // false-positive matches across visual word breaks.
+      text += ' ';
+    }
+    pages.push({ pageNum: i + 1, text, lower: text.toLowerCase(), ranges });
+  }
+  return pages;
+}
+
+function clearFindHighlights() {
+  document.querySelectorAll('.text-layer span.find-match, .text-layer span.find-match-current')
+    .forEach(el => el.classList.remove('find-match', 'find-match-current'));
+}
+
+function runFind(preserveCurrent = false) {
+  clearFindHighlights();
+  findMatches = [];
+  const q = findQuery.toLowerCase();
+  if (!q) {
+    findCurrent = -1;
+    updateFindUI();
+    return;
+  }
+
+  const pages = buildFindIndex();
+  for (const page of pages) {
+    let from = 0;
+    while (from <= page.lower.length) {
+      const idx = page.lower.indexOf(q, from);
+      if (idx === -1) break;
+      const hitEnd = idx + q.length;
+      const spans = page.ranges.filter(r => r.start < hitEnd && r.end > idx).map(r => r.span);
+      findMatches.push({ pageNum: page.pageNum, idx, spans });
+      from = idx + Math.max(1, q.length);
+    }
+  }
+
+  for (const m of findMatches) {
+    for (const span of m.spans) span.classList.add('find-match');
+  }
+
+  if (findMatches.length === 0) {
+    findCurrent = -1;
+  } else if (!preserveCurrent || findCurrent < 0 || findCurrent >= findMatches.length) {
+    findCurrent = 0;
+  }
+  if (findCurrent >= 0) markCurrent(false);
+  updateFindUI();
+}
+
+function markCurrent(scroll = true) {
+  document.querySelectorAll('.text-layer span.find-match-current')
+    .forEach(el => el.classList.remove('find-match-current'));
+  const m = findMatches[findCurrent];
+  if (!m) return;
+  for (const span of m.spans) span.classList.add('find-match-current');
+  if (scroll && m.spans.length > 0) {
+    m.spans[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('page-input').value = m.pageNum;
+  }
+}
+
+function updateFindUI() {
+  const has = findMatches.length > 0;
+  if (findQuery && !has) {
+    findInput.classList.add('find-no-results');
+    findCount.textContent = '0/0';
+  } else {
+    findInput.classList.remove('find-no-results');
+    findCount.textContent = has ? `${findCurrent + 1}/${findMatches.length}` : (findQuery ? '0/0' : '');
+  }
+  findPrev.disabled = !has;
+  findNext.disabled = !has;
+}
+
+function gotoNext(delta) {
+  if (findMatches.length === 0) return;
+  findCurrent = (findCurrent + delta + findMatches.length) % findMatches.length;
+  markCurrent(true);
+  updateFindUI();
+}
+
+function openFindBar() {
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+}
+
+function closeFindBar() {
+  findBar.hidden = true;
+  findQuery = '';
+  findInput.value = '';
+  clearFindHighlights();
+  findMatches = [];
+  findCurrent = -1;
+}
+
+findInput.addEventListener('input', () => {
+  findQuery = findInput.value;
+  runFind(false);
+});
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    gotoNext(e.shiftKey ? -1 : 1);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeFindBar();
+  }
+});
+findPrev.addEventListener('click', () => gotoNext(-1));
+findNext.addEventListener('click', () => gotoNext(1));
+findClose.addEventListener('click', closeFindBar);
+
+// Text-layer spans are rebuilt on every zoom/rerender, so previously applied
+// highlights vanish. Re-run the find after each page renders to restore them.
+document.addEventListener('pdfpagerendered', () => {
+  if (!findBar.hidden && findQuery) runFind(true);
+});
+
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
+  // Ctrl/Cmd+F: open the find bar regardless of focus.
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
+    e.preventDefault();
+    openFindBar();
+    return;
+  }
+  // Escape closes the find bar even when focus has moved away.
+  if (e.key === 'Escape' && !findBar.hidden) {
+    e.preventDefault();
+    closeFindBar();
+    return;
+  }
+  // Don't hijack keys while the user is typing in any editable field. The
+  // sidebar's note editor and the text-note overlay are TEXTAREAs (not INPUTs),
+  // so a tagName check alone let `+` `-` `=` leak through to PDF zoom.
+  if (e.target.closest?.('input, textarea, [contenteditable=""], [contenteditable="true"]')) return;
 
   if (e.key === '+' || e.key === '=') {
     document.getElementById('zoom-in').click();
