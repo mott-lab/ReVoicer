@@ -69,7 +69,10 @@ async function loadPdf(url) {
 
     document.getElementById('page-count').textContent = pdfDoc.numPages;
     document.getElementById('page-input').max = pdfDoc.numPages;
-    document.title = `PDF Converser - ${decodeURIComponent(url.split('/').pop().split('?')[0])}`;
+    // Prefer the decoded original filename; the raw URL tail is a base64url blob.
+    const titleName = (typeof getPdfBaseName === 'function' && getPdfBaseName()) ||
+      decodeURIComponent(url.split('/').pop().split('?')[0]);
+    document.title = `PDF Converser - ${titleName}`;
 
     // Reset render state for the new document.
     if (activeRenderTask) {

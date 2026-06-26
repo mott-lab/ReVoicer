@@ -16,6 +16,8 @@ const { transcribeAudio } = require('./services/transcribe-service');
 const { getSettingsStore } = require('./services/settings-store');
 const { checkReview, getSavedReviewCheck } = require('./services/review-check-service');
 const { getReviewCheckStore } = require('./services/review-check-store');
+const { generateReview, getSavedReview, saveReview } = require('./services/review-generate-service');
+const { getReviewGenerateStore } = require('./services/review-generate-store');
 const { getReferencesStore } = require('./services/references-store');
 const { getRubricStore } = require('./services/rubric-store');
 const { extractRubricItems } = require('./services/rubric-extract-service');
@@ -198,6 +200,24 @@ const routes = {
     return checkReview({
       pdfIdentifier: body.pdf_identifier,
       rubricText: body.rubric_text || '',
+    });
+  },
+
+  // ─── Review Generate ───────────────────────────────────────────────────
+
+  'GET /api/review/': async ({ query }) => {
+    return getSavedReview(query.pdf_identifier);
+  },
+
+  'POST /api/review/generate': async ({ body }) => {
+    return generateReview({ pdfIdentifier: body.pdf_identifier });
+  },
+
+  'PUT /api/review/': async ({ body }) => {
+    return saveReview({
+      pdfIdentifier: body.pdf_identifier,
+      reviewText: body.review_text || '',
+      filePath: body.file_path || '',
     });
   },
 
@@ -411,6 +431,7 @@ function initialize({ notesDir }) {
   getDocumentStore(notesDir);
   getQAStore(notesDir);
   getReviewCheckStore(notesDir);
+  getReviewGenerateStore(notesDir);
   getReferencesStore(notesDir);
   getRubricStore(notesDir);
   getRubricTemplatesStore(notesDir);

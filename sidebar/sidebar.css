@@ -941,6 +941,113 @@ button.note-section-pill:hover {
   text-align: center;
 }
 
+/* Review tab: metadata line (timestamp / saved path) and editor actions. */
+.review-meta {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+
+.review-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.review-editor-actions .review-primary {
+  background: #4285f4;
+  color: white;
+  border-color: #4285f4;
+}
+
+.review-editor-actions .review-primary:hover:not(:disabled) {
+  background: #3367d6;
+  border-color: #3367d6;
+}
+
+.review-editor-actions .toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Live streaming view while a review generates. */
+.review-thinking-wrap {
+  margin: 6px 0 10px;
+}
+
+.review-thinking-wrap summary {
+  cursor: pointer;
+  color: #888;
+  font-size: 12px;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.review-thinking-wrap summary:hover {
+  color: #555;
+}
+
+.review-thinking {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #888;
+  background: #f6f6f6;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.review-stream-output {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #222;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 12px 14px;
+  min-height: 120px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.review-stream-output:empty::before {
+  content: attr(placeholder);
+  color: #aaa;
+}
+
+/* Generated review draft — editable Markdown textarea. */
+.generated-review-edit {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 320px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #222;
+  background: #fafafa;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+.generated-review-edit:focus {
+  outline: none;
+  border-color: #4285f4;
+  background: #fff;
+}
+
 .review-component {
   padding: 10px 0;
   border-bottom: 1px solid #f0f0f0;

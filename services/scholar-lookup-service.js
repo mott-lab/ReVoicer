@@ -23,6 +23,7 @@ const { getCitationsStore } = require('./citations-store');
 const { getSettingsStore } = require('./settings-store');
 const { extractCitations } = require('./citation-extract-service');
 const { stripMarker, extractIdentifiers, extractTitle, cleanQuery } = require('./reference-parse');
+const { fetchAbstractByDoi } = require('./openalex-service');
 
 const S2_BASE = 'https://api.semanticscholar.org/graph/v1';
 const FIELDS = 'title,authors,year,venue,abstract,externalIds,url';
@@ -93,6 +94,9 @@ function normalizePaper(paper, { number, raw, gsUrl, strategy }) {
     year: paper.year || null,
     venue: paper.venue || '',
     abstract: paper.abstract || '',
+    // 'semantic_scholar' when S2 supplied the abstract; otherwise left null for
+    // ensureAbstract to fill ('openalex') or mark exhausted ('none').
+    abstract_source: paper.abstract ? 'semantic_scholar' : null,
     doi,
     url: paper.url || (doi ? `https://doi.org/${doi}` : null),
     google_scholar_url: gsUrl,
@@ -100,6 +104,29 @@ function normalizePaper(paper, { number, raw, gsUrl, strategy }) {
     match_strategy: strategy,
     match_score: typeof paper.matchScore === 'number' ? paper.matchScore : null,
   };
+}
+
+// Fill a missing abstract from OpenAlex (S2's API withholds abstracts for many
+// closed-access publishers). Attempt-once: `abstract_source` is always set
+// afterwards ('openalex' on success, 'none' when no source has it) so a paper
+// without an abstract isn't re-requested on every modal open. `refDoi` is the
+// DOI parsed from the raw reference, used when S2's matched record lacks one.
+async function ensureAbstract(result, refDoi) {
+  if (!result || result.status !== 'ok') return result;
+  if (result.abstract) {
+    result.abstract_source = result.abstract_source || 'semantic_scholar';
+    return result;
+  }
+  if (result.abstract_source) return result; // already attempted
+  const doi = result.doi || refDoi || null;
+  const abstract = doi ? await fetchAbstractByDoi(doi) : '';
+  if (abstract) {
+    result.abstract = abstract;
+    result.abstract_source = 'openalex';
+  } else {
+    result.abstract_source = 'none';
+  }
+  return result;
 }
 
 // Ask the configured LLM to parse one reference into structured fields. Used
@@ -145,7 +172,15 @@ async function lookupCitation({ pdfIdentifier, number }) {
   const key = String(number);
   // Serve a cached result, but allow retry of a previously errored lookup.
   const cached = record?.lookups?.[key];
-  if (cached && cached.status !== 'error') return cached;
+  if (cached && cached.status !== 'error') {
+    // Backfill abstracts for entries cached before the OpenAlex fallback existed
+    // (they lack `abstract_source`). Attempt-once, and only when a DOI is known.
+    if (cached.status === 'ok' && !cached.abstract && !cached.abstract_source && cached.doi) {
+      await ensureAbstract(cached, null);
+      await store.saveLookup(pdfIdentifier, number, cached);
+    }
+    return cached;
+  }
 
   const entry = record?.entries?.find((e) => String(e.number) === key);
   if (!entry) {
@@ -197,6 +232,9 @@ async function lookupCitation({ pdfIdentifier, number }) {
       const paper = await strat.run();
       if (paper) {
         const result = normalizePaper(paper, { number, raw, gsUrl, strategy: strat.name });
+        // `doi` is the identifier parsed from the raw reference — used when the
+        // matched S2 record itself carries no DOI.
+        await ensureAbstract(result, doi);
         await store.saveLookup(pdfIdentifier, number, result);
         return result;
       }

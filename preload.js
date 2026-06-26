@@ -134,7 +134,17 @@ window.desktop = {
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
+  selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
+  selectFile: () => ipcRenderer.invoke('desktop:selectFile'),
+  generateReview: (pdfIdentifier) => ipcRenderer.invoke('desktop:generateReview', pdfIdentifier),
+  chooseSavePath: (defaultPath) => ipcRenderer.invoke('desktop:chooseSavePath', defaultPath),
 };
+
+// Relay streamed review-generation chunks onto a DOM event the sidebar listens
+// to (same pattern as the whisper/vosk progress toasts above).
+ipcRenderer.on('desktop:reviewChunk', (_e, payload) => {
+  window.dispatchEvent(new CustomEvent('pdfc-review-chunk', { detail: payload }));
+});
 
 // The settings window lives in its own BrowserWindow; when settings are saved
 // there, main pings the main window so the PDF pane can re-render highlights

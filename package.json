@@ -10,7 +10,7 @@
     "postinstall": "node scripts/download-vosk-model.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
+    "@anthropic-ai/sdk": "^0.65.0",
     "openai": "^4.70.0",
     "vosk-browser": "^0.0.8"
   },

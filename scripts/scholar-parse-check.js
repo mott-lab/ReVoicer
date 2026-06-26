@@ -4,6 +4,7 @@
 // the app to SAMPLES to tune the heuristics.
 
 const { extractIdentifiers, extractTitle, cleanQuery } = require('../services/reference-parse');
+const { invertedIndexToText } = require('../services/openalex-service');
 
 const SAMPLES = [
   // IEEE — quoted title
@@ -30,3 +31,9 @@ for (const raw of SAMPLES) {
   console.log('title :', extractTitle(raw));
   console.log('query :', cleanQuery(raw));
 }
+
+// OpenAlex inverted-index reconstruction (pure; used to recover abstracts S2's
+// API withholds). Expect the words to come back in position order.
+const idx = { Deep: [0], learning: [1], powers: [2], modern: [3], AI: [4] };
+console.log('\ninverted-index ->', JSON.stringify(invertedIndexToText(idx)));
+console.log('empty/malformed ->', JSON.stringify(invertedIndexToText(null)), JSON.stringify(invertedIndexToText({})));

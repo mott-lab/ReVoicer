@@ -6,9 +6,15 @@
   <style>
     html, body { margin: 0; padding: 0; background: #1e1e1e; color: #e0e0e0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 14px; }
-    .wrap { padding: 20px 24px; max-width: 600px; }
-    h1 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
+      font-size: 14px; height: 100%; }
+    .wrap { padding: 16px 20px; box-sizing: border-box; height: 100%;
+      display: flex; flex-direction: column; }
+    h1 { font-size: 16px; font-weight: 600; margin: 0 0 14px; }
+
+    /* Full-height layout: a vertical tab rail on the left, scrolling content on
+       the right; the action bar stays pinned below. */
+    .settings-layout { display: flex; gap: 16px; flex: 1; min-height: 0; }
+    .settings-content { flex: 1; min-width: 0; overflow-y: auto; padding-right: 6px; }
 
     fieldset { border: 1px solid #333; border-radius: 6px; padding: 12px 16px;
       margin: 0 0 14px; }
@@ -97,13 +103,52 @@
     .model-row:hover { background: #303030; filter: none; }
     .model-row.active { background: #1e3a5f; border-color: #2d7ff9; color: #fff; }
     .model-picker-empty { color: #888; font-size: 12px; padding: 6px; }
+
+    /* Tabs — a vertical rail on the left; one panel visible at a time. */
+    .tab-bar { display: flex; flex-direction: column; gap: 4px;
+      flex: 0 0 180px; width: 180px; }
+    .tab-btn {
+      width: 100%; text-align: left;
+      background: #2a2a2a; border: 1px solid #444; border-radius: 4px;
+      color: #ccc; font-size: 13px; padding: 9px 12px; cursor: pointer;
+      font-family: inherit;
+    }
+    .tab-btn:hover { background: #333; filter: none; }
+    .tab-btn.active { background: #1e3a5f; border-color: #2d7ff9; color: #fff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    textarea {
+      width: 100%; box-sizing: border-box; background: #2a2a2a;
+      color: #e0e0e0; border: 1px solid #444; border-radius: 4px;
+      padding: 6px 8px; font-size: 13px; font-family: inherit;
+      resize: vertical; min-height: 90px;
+    }
+    textarea:focus { outline: none; border-color: #2d7ff9; }
+
+    /* Read-only path field + Choose/Clear buttons (folder & file pickers). */
+    .path-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+    .path-row input { flex: 1; min-width: 0; }
+    .path-row button { flex: 0 0 auto; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Settings</h1>
 
-    <!-- ── Text section: cleanup, organize, Q&A ───────────────────────── -->
+    <div class="settings-layout">
+      <div class="tab-bar">
+        <button class="tab-btn active" type="button" data-tab="text">Text Processing</button>
+        <button class="tab-btn" type="button" data-tab="speech">Speech-to-Text</button>
+        <button class="tab-btn" type="button" data-tab="review">Review</button>
+        <button class="tab-btn" type="button" data-tab="references">References</button>
+        <button class="tab-btn" type="button" data-tab="ui">User Interface</button>
+      </div>
+
+      <div class="settings-content">
+
+    <!-- ── Text Processing tab: cleanup, organize, Q&A ─────────────────── -->
+    <div class="tab-panel active" data-tab="text">
     <fieldset>
       <legend>Text Processing</legend>
 
@@ -124,7 +169,7 @@
       <!-- OpenAI -->
       <div class="provider-block" data-provider="openai">
         <label>API Key</label>
-        <input id="openai_api_key" type="password" placeholder="sk-...">
+        <input id="openai_api_key" type="text" placeholder="sk-...">
         <label>Model</label>
         <input id="openai_model" type="text" placeholder="gpt-4o-mini">
         <label>Base URL <span style="color:#666">(optional)</span></label>
@@ -139,7 +184,7 @@
       <!-- Anthropic -->
       <div class="provider-block" data-provider="anthropic">
         <label>API Key</label>
-        <input id="anthropic_api_key" type="password" placeholder="sk-ant-...">
+        <input id="anthropic_api_key" type="text" placeholder="sk-ant-...">
         <label>Model</label>
         <input id="anthropic_model" type="text" placeholder="claude-haiku-4-5-20251001">
         <div class="test-row">
@@ -176,7 +221,7 @@
         <div class="row">
           <div>
             <label>API Key</label>
-            <input id="openai_compat_api_key" type="password" placeholder="(optional for some local servers)">
+            <input id="openai_compat_api_key" type="text" placeholder="(optional for some local servers)">
           </div>
           <div>
             <label>Model</label>
@@ -191,8 +236,10 @@
         <div class="help">For Groq, OpenRouter, Together, LM Studio, vLLM, llama.cpp server, etc. Anything that speaks the OpenAI chat-completions protocol.</div>
       </div>
     </fieldset>
+    </div><!-- /text panel -->
 
-    <!-- ── Speech section ─────────────────────────────────────────────── -->
+    <!-- ── Speech-to-Text tab ─────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="speech">
     <fieldset>
       <legend>Speech-to-Text</legend>
       <label>Mode</label>
@@ -204,16 +251,132 @@
       </div>
       <div class="help" id="speech_help"></div>
     </fieldset>
+    </div><!-- /speech panel -->
 
-    <!-- ── Citations section ──────────────────────────────────────────── -->
+    <!-- ── Review tab ─────────────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="review">
+    <fieldset>
+      <legend>Review Model</legend>
+
+      <div class="test-row" style="margin-top:0; margin-bottom:4px;">
+        <button class="small secondary" type="button" id="autofill_review_keys">Autofill from Text Processing</button>
+        <span class="test-result" id="autofill_review_status"></span>
+      </div>
+      <div class="help">Pick a (typically stronger) model to draft reviews. This keeps its own credentials — use the button above to copy the keys you already entered in Text Processing.</div>
+
+      <label>Provider</label>
+      <div class="provider-bar">
+        <label><input type="radio" name="review_provider" value="openai"><span>OpenAI</span></label>
+        <label><input type="radio" name="review_provider" value="anthropic"><span>Anthropic</span></label>
+        <label><input type="radio" name="review_provider" value="ollama"><span>Ollama</span></label>
+        <label><input type="radio" name="review_provider" value="openai_compat"><span>OpenAI-compat</span></label>
+      </div>
+
+      <!-- OpenAI -->
+      <div class="provider-block" data-provider="openai">
+        <label>API Key</label>
+        <input id="review_openai_api_key" type="text" placeholder="sk-...">
+        <label>Model</label>
+        <input id="review_openai_model" type="text" placeholder="gpt-4o-mini">
+        <label>Base URL <span style="color:#666">(optional)</span></label>
+        <input id="review_openai_base_url" type="text" placeholder="https://api.openai.com/v1">
+        <div class="test-row">
+          <button class="small" data-test="review_openai">Test connection</button>
+          <span class="test-result" id="test_review_openai"></span>
+        </div>
+        <div class="model-picker" id="models_review_openai" hidden></div>
+      </div>
+
+      <!-- Anthropic -->
+      <div class="provider-block" data-provider="anthropic">
+        <label>API Key</label>
+        <input id="review_anthropic_api_key" type="text" placeholder="sk-ant-...">
+        <label>Model</label>
+        <input id="review_anthropic_model" type="text" placeholder="claude-haiku-4-5-20251001">
+        <div class="test-row">
+          <button class="small" data-test="review_anthropic">Test connection</button>
+          <span class="test-result" id="test_review_anthropic"></span>
+        </div>
+        <div class="model-picker" id="models_review_anthropic" hidden></div>
+      </div>
+
+      <!-- Ollama -->
+      <div class="provider-block" data-provider="ollama">
+        <div class="row">
+          <div>
+            <label>Base URL</label>
+            <input id="review_ollama_base_url" type="text" placeholder="http://localhost:11434">
+          </div>
+          <div>
+            <label>Model</label>
+            <input id="review_ollama_model" type="text" placeholder="llama3.2">
+          </div>
+        </div>
+        <div class="test-row">
+          <button class="small" data-test="review_ollama">Test &amp; list models</button>
+          <span class="test-result" id="test_review_ollama"></span>
+        </div>
+        <div class="model-picker" id="models_review_ollama" hidden></div>
+        <div class="help">Local-only, no API key required.</div>
+      </div>
+
+      <!-- OpenAI-compatible -->
+      <div class="provider-block" data-provider="openai_compat">
+        <label>Base URL</label>
+        <input id="review_openai_compat_base_url" type="text" placeholder="https://api.groq.com/openai/v1">
+        <div class="row">
+          <div>
+            <label>API Key</label>
+            <input id="review_openai_compat_api_key" type="text" placeholder="(optional for some local servers)">
+          </div>
+          <div>
+            <label>Model</label>
+            <input id="review_openai_compat_model" type="text" placeholder="llama-3.1-70b-versatile">
+          </div>
+        </div>
+        <div class="test-row">
+          <button class="small" data-test="review_openai_compat">Test connection</button>
+          <span class="test-result" id="test_review_openai_compat"></span>
+        </div>
+        <div class="model-picker" id="models_review_openai_compat" hidden></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Review Guidance</legend>
+
+      <label>Example reviews folder <span style="color:#666">(optional)</span></label>
+      <div class="path-row">
+        <input id="review_examples_dir" type="text" readonly placeholder="(none selected)">
+        <button class="small" type="button" id="pick_examples_dir">Choose…</button>
+        <button class="small secondary" type="button" id="clear_examples_dir">Clear</button>
+      </div>
+      <div class="help">A folder of .txt or .md example reviews. The model imitates their structure and voice (up to 3 files are used).</div>
+
+      <label>Instructions</label>
+      <textarea id="review_instructions" placeholder="Write a review for the academic research manuscript. Use any note contents and rubric provided."></textarea>
+      <div class="help">Describe how the review should be structured and what to emphasize.</div>
+
+      <label>Writing style guide <span style="color:#666">(optional)</span></label>
+      <textarea id="review_style_guide" placeholder="e.g. Formal, constructive tone. Concise paragraphs over bullet lists. Refer to the authors in the third person. Avoid hedging language."></textarea>
+      <div class="help">Describe the voice, tone, and formatting the review should follow — treated as style guidance distinct from the structural instructions above.</div>
+
+      <div class="help" style="margin-top:10px; color:#aaa;">Tip: For higher-quality reviews, point to a folder of example reviews and write detailed instructions plus a style guide describing how the reviewer prefers to structure and word their reviews.</div>
+    </fieldset>
+    </div><!-- /review panel -->
+
+    <!-- ── References tab ─────────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="references">
     <fieldset>
       <legend>Reference Lookup</legend>
       <label>Semantic Scholar API Key <span style="color:#666">(optional)</span></label>
-      <input id="semantic_scholar_api_key" type="password" placeholder="(leave blank to use the shared, rate-limited pool)">
+      <input id="semantic_scholar_api_key" type="text" placeholder="(leave blank to use the shared, rate-limited pool)">
       <div class="help">Used when clicking an in-text citation to fetch its title, authors, and abstract. Lookups happen only on click and are cached per PDF. Without a key, requests use Semantic Scholar's shared pool, which is heavily rate-limited. Request a free key at <span style="color:#aaa">semanticscholar.org/product/api</span>.</div>
     </fieldset>
+    </div><!-- /references panel -->
 
-    <!-- ── Highlights section ─────────────────────────────────────────── -->
+    <!-- ── User Interface tab ─────────────────────────────────────────── -->
+    <div class="tab-panel" data-tab="ui">
     <fieldset>
       <legend>Highlights</legend>
       <label class="toggle">
@@ -222,6 +385,9 @@
       </label>
       <div class="help">When off, all highlights use a yellow background. When on, each highlight is colored by its primary tag. Click a tag on a note (or the color swatch) to recolor one highlight.</div>
     </fieldset>
+    </div><!-- /ui panel -->
+      </div><!-- /settings-content -->
+    </div><!-- /settings-layout -->
 
     <div class="actions">
       <button class="secondary" id="cancel">Close</button>
@@ -234,12 +400,36 @@
     const $ = (id) => document.getElementById(id);
     const status = $('status');
 
-    function syncTextProviderBlocks() {
-      const provider = document.querySelector('input[name=text_provider]:checked')?.value;
-      document.querySelectorAll('.provider-block').forEach((el) => {
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach((b) => {
+        b.classList.toggle('active', b.dataset.tab === name);
+      });
+      document.querySelectorAll('.tab-panel').forEach((p) => {
+        p.classList.toggle('active', p.dataset.tab === name);
+      });
+    }
+    document.querySelectorAll('.tab-btn').forEach((b) => {
+      b.addEventListener('click', () => switchTab(b.dataset.tab));
+    });
+
+    // Review tab folder/file pickers (delegate to the native dialogs in main).
+    $('pick_examples_dir').addEventListener('click', async () => {
+      const p = await window.desktop.selectDirectory();
+      if (p) $('review_examples_dir').value = p;
+    });
+    $('clear_examples_dir').addEventListener('click', () => { $('review_examples_dir').value = ''; });
+
+    // Toggle which provider block is visible within a single tab panel. Scoped
+    // by panel so the Text Processing and Review selectors don't affect each
+    // other (both use the same .provider-block class).
+    function syncProviderBlocks(panelTab, radioName) {
+      const provider = document.querySelector(`input[name=${radioName}]:checked`)?.value;
+      document.querySelectorAll(`.tab-panel[data-tab="${panelTab}"] .provider-block`).forEach((el) => {
         el.classList.toggle('active', el.dataset.provider === provider);
       });
     }
+    function syncTextProviderBlocks() { syncProviderBlocks('text', 'text_provider'); }
+    function syncReviewProviderBlocks() { syncProviderBlocks('review', 'review_provider'); }
 
     function syncSpeechHelp() {
       const v = document.querySelector('input[name=speech_provider]:checked')?.value;
@@ -260,8 +450,37 @@
     document.querySelectorAll('input[name=text_provider]').forEach((r) => {
       r.addEventListener('change', syncTextProviderBlocks);
     });
+    document.querySelectorAll('input[name=review_provider]').forEach((r) => {
+      r.addEventListener('change', syncReviewProviderBlocks);
+    });
     document.querySelectorAll('input[name=speech_provider]').forEach((r) => {
       r.addEventListener('change', syncSpeechHelp);
+    });
+
+    // Copy the Text Processing credentials/models into the Review fields, plus
+    // mirror the selected provider, so the user doesn't re-enter keys.
+    $('autofill_review_keys').addEventListener('click', () => {
+      const map = {
+        review_openai_api_key: 'openai_api_key',
+        review_openai_model: 'openai_model',
+        review_openai_base_url: 'openai_base_url',
+        review_anthropic_api_key: 'anthropic_api_key',
+        review_anthropic_model: 'anthropic_model',
+        review_ollama_base_url: 'ollama_base_url',
+        review_ollama_model: 'ollama_model',
+        review_openai_compat_base_url: 'openai_compat_base_url',
+        review_openai_compat_api_key: 'openai_compat_api_key',
+        review_openai_compat_model: 'openai_compat_model',
+      };
+      for (const [dest, src] of Object.entries(map)) $(dest).value = $(src).value;
+      const tp = document.querySelector('input[name=text_provider]:checked')?.value;
+      if (tp) {
+        document.querySelector(`input[name=review_provider][value="${tp}"]`)?.click();
+      }
+      syncReviewProviderBlocks();
+      const el = $('autofill_review_status');
+      el.classList.remove('err'); el.classList.add('ok');
+      el.textContent = 'Copied from Text Processing.';
     });
 
     function readForm() {
@@ -285,6 +504,21 @@
         openai_compat_model: $('openai_compat_model').value.trim(),
 
         semantic_scholar_api_key: $('semantic_scholar_api_key').value.trim(),
+
+        review_provider: document.querySelector('input[name=review_provider]:checked').value,
+        review_openai_api_key: $('review_openai_api_key').value.trim(),
+        review_openai_model: $('review_openai_model').value.trim() || 'gpt-4o-mini',
+        review_openai_base_url: $('review_openai_base_url').value.trim(),
+        review_anthropic_api_key: $('review_anthropic_api_key').value.trim(),
+        review_anthropic_model: $('review_anthropic_model').value.trim() || 'claude-haiku-4-5-20251001',
+        review_ollama_base_url: $('review_ollama_base_url').value.trim() || 'http://localhost:11434',
+        review_ollama_model: $('review_ollama_model').value.trim() || 'llama3.2',
+        review_openai_compat_base_url: $('review_openai_compat_base_url').value.trim(),
+        review_openai_compat_api_key: $('review_openai_compat_api_key').value.trim(),
+        review_openai_compat_model: $('review_openai_compat_model').value.trim(),
+        review_examples_dir: $('review_examples_dir').value.trim(),
+        review_instructions: $('review_instructions').value,
+        review_style_guide: $('review_style_guide').value,
 
         auto_color_highlights: $('auto_color_highlights').checked,
       };
@@ -310,9 +544,25 @@
 
       $('semantic_scholar_api_key').value = s.semantic_scholar_api_key || '';
 
+      document.querySelector(`input[name=review_provider][value="${s.review_provider}"]`)?.click();
+      $('review_openai_api_key').value = s.review_openai_api_key || '';
+      $('review_openai_model').value = s.review_openai_model || '';
+      $('review_openai_base_url').value = s.review_openai_base_url || '';
+      $('review_anthropic_api_key').value = s.review_anthropic_api_key || '';
+      $('review_anthropic_model').value = s.review_anthropic_model || '';
+      $('review_ollama_base_url').value = s.review_ollama_base_url || '';
+      $('review_ollama_model').value = s.review_ollama_model || '';
+      $('review_openai_compat_base_url').value = s.review_openai_compat_base_url || '';
+      $('review_openai_compat_api_key').value = s.review_openai_compat_api_key || '';
+      $('review_openai_compat_model').value = s.review_openai_compat_model || '';
+      $('review_examples_dir').value = s.review_examples_dir || '';
+      $('review_instructions').value = s.review_instructions || '';
+      $('review_style_guide').value = s.review_style_guide || '';
+
       $('auto_color_highlights').checked = s.auto_color_highlights === true;
 
       syncTextProviderBlocks();
+      syncReviewProviderBlocks();
       syncSpeechHelp();
     }
 
@@ -336,6 +586,10 @@
       openai_compat: 'openai_compat_model',
       anthropic: 'anthropic_model',
       ollama: 'ollama_model',
+      review_openai: 'review_openai_model',
+      review_openai_compat: 'review_openai_compat_model',
+      review_anthropic: 'review_anthropic_model',
+      review_ollama: 'review_ollama_model',
     };
 
     // After a successful Test, surface the returned model ids as an expandable,

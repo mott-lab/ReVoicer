@@ -165,6 +165,7 @@
           <button class="tab-btn" data-tab="questions">Questions</button>
           <button class="tab-btn" data-tab="references">References</button>
           <button class="tab-btn" data-tab="rubric">Rubric</button>
+          <button class="tab-btn" data-tab="review">Review</button>
         </div>
 
         <div id="notes-toolbar" class="toolbar">
@@ -198,6 +199,10 @@
           </select>
           <button id="save-rubric-btn" class="toolbar-btn" title="Save the current rubric under a name for reuse">Save as…</button>
         </div>
+
+        <div id="review-toolbar" class="toolbar" style="display: none;">
+          <button id="generate-review-btn" class="toolbar-btn" title="Draft a review from your notes and rubric">Generate Review</button>
+        </div>
       </div>
 
       <div class="sidebar-content">
@@ -212,6 +217,7 @@
         <div id="questions-container" style="display: none;"></div>
         <div id="references-container" style="display: none;"></div>
         <div id="rubric-container" style="display: none;"></div>
+        <div id="review-container" style="display: none;"></div>
       </div>
     </div>
   </aside>

@@ -245,3 +245,6 @@ reproducibility):
 - **Structured review generation** — organize the review export by the
   rubric's categories rather than a generic format.
 
+### Review claim check
+- check each critique made in the review. if it makes some claim, is that claim appropriately supported? e.g., if it says, "there is related work on XYZ", does the review provide citations to support this? or if it says, "there is not enough engagement with the literature in this discussion section", how many references are included in that section of the text?
+

@@ -44,6 +44,29 @@ const DEFAULTS = {
   // fine — the keyless pool works at low volume, a key just raises rate limits.
   semantic_scholar_api_key: '',
 
+  // Review generation has its own provider selector + credentials (mirrors the
+  // text_* fields) so a different/stronger model can draft reviews. The Settings
+  // UI offers an "Autofill from Text Processing" button to copy the text keys.
+  review_provider: 'openai',         // 'openai' | 'anthropic' | 'ollama' | 'openai_compat'
+
+  review_openai_api_key: '',
+  review_openai_model: 'gpt-4o-mini',
+  review_openai_base_url: '',
+
+  review_anthropic_api_key: '',
+  review_anthropic_model: 'claude-haiku-4-5-20251001',
+
+  review_ollama_base_url: 'http://localhost:11434',
+  review_ollama_model: 'llama3.2',
+
+  review_openai_compat_base_url: '',
+  review_openai_compat_api_key: '',
+  review_openai_compat_model: '',
+
+  review_examples_dir: '',           // folder of .txt/.md example reviews (few-shot)
+  review_instructions: 'Write a review for the academic research manuscript. Use any note contents and rubric provided.',
+  review_style_guide: '',            // voice/tone/formatting guidance for the review
+
   // Highlight appearance. false (default) → every highlight uses a flat yellow
   // background; true → highlights are colored by the note's primary tag. Per-note
   // color overrides (swatch picker / clicking a tag badge) win over both.

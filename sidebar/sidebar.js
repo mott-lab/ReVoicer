@@ -56,6 +56,7 @@ async function init() {
         else if (currentTab === 'questions') loadQuestions();
         else if (currentTab === 'references') loadReferences();
         else if (currentTab === 'rubric') loadRubric();
+        else if (currentTab === 'review' && !reviewGenerating) loadReview();
       } else if (!newId) {
         currentPdfId = null;
         const titleEl = document.getElementById('pdf-title');
@@ -68,6 +69,8 @@ async function init() {
           '<p class="empty-state">Open a PDF to manage references.</p>';
         document.getElementById('rubric-container').innerHTML =
           '<p class="empty-state">Open a PDF to manage rubric sections.</p>';
+        document.getElementById('review-container').innerHTML =
+          '<p class="empty-state">Open a PDF to generate a review.</p>';
       }
     }
   });
@@ -95,6 +98,11 @@ async function init() {
   // pasted conference rubric. The last rubric + result is persisted per
   // PDF, so reopening shows the previous state and a Re-check button.
   document.getElementById('check-review-btn').addEventListener('click', openReviewCheckModal);
+
+  // Generate Review button (in the Review tab) — streams a full review inline,
+  // then prompts for a file to save it to. Drafts from notes, rubric, and
+  // manuscript text using the model/instructions from the Review tab of Settings.
+  document.getElementById('generate-review-btn').addEventListener('click', runGenerateReview);
 
   // Add Reference button — appends an empty row that the user fills in.
   document.getElementById('add-reference-btn').addEventListener('click', () => {
@@ -139,15 +147,19 @@ function switchTab(tab) {
   const questionsContainer = document.getElementById('questions-container');
   const referencesContainer = document.getElementById('references-container');
   const rubricContainer = document.getElementById('rubric-container');
+  const reviewToolbar = document.getElementById('review-toolbar');
+  const reviewContainer = document.getElementById('review-container');
 
   notesToolbar.style.display = 'none';
   questionsToolbar.style.display = 'none';
   referencesToolbar.style.display = 'none';
   rubricToolbar.style.display = 'none';
+  reviewToolbar.style.display = 'none';
   notesContainer.style.display = 'none';
   questionsContainer.style.display = 'none';
   referencesContainer.style.display = 'none';
   rubricContainer.style.display = 'none';
+  reviewContainer.style.display = 'none';
 
   if (tab === 'notes') {
     notesToolbar.style.display = 'flex';
@@ -165,6 +177,11 @@ function switchTab(tab) {
     rubricToolbar.style.display = 'flex';
     rubricContainer.style.display = '';
     loadRubric();
+  } else if (tab === 'review') {
+    reviewToolbar.style.display = 'flex';
+    reviewContainer.style.display = '';
+    // Don't reload over a live generation — it would clobber the stream.
+    if (!reviewGenerating) loadReview();
   }
 }
 
@@ -1333,6 +1350,13 @@ function attachNoteCardClickHandlers(container) {
   });
 }
 
+// Default download base name: the open PDF's original filename (no extension),
+// derived from the app URL by lib/pdf-identifier.js. Falls back to
+// 'annotations' when no PDF filename is available.
+function notesFilenameBase() {
+  return (typeof getPdfBaseName === 'function' ? getPdfBaseName() : '') || 'annotations';
+}
+
 async function exportMarkdown() {
   if (!currentPdfId) return;
 
@@ -1342,7 +1366,7 @@ async function exportMarkdown() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'annotations.md';
+    a.download = `${notesFilenameBase()}_notes.md`;
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
@@ -1389,7 +1413,7 @@ async function exportJson() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'annotations.json';
+    a.download = `${notesFilenameBase()}_notes.json`;
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
@@ -1646,6 +1670,202 @@ async function runReviewCheck(rubricText) {
       renderReviewError(`Check failed: ${msg}`, rubricText, true);
     }
   }
+}
+
+// ─── Review tab ───────────────────────────────────────────────────────────
+//
+// Drafts a full peer review (free-form Markdown) from the manuscript text,
+// notes, and rubric, guided by the Review-tab settings. Streams live (thinking
+// + output) inline in the tab, prompts for a file to save to, then shows an
+// editable draft whose Save overwrites that file.
+
+let reviewGenerating = false;     // true while a generation is streaming
+let reviewStreamHandler = null;   // window listener for pdfc-review-chunk
+
+function stopReviewStream() {
+  if (reviewStreamHandler) {
+    window.removeEventListener('pdfc-review-chunk', reviewStreamHandler);
+    reviewStreamHandler = null;
+  }
+}
+
+async function loadReview() {
+  const container = document.getElementById('review-container');
+  if (!currentPdfId) {
+    container.innerHTML = '<p class="empty-state">Open a PDF to generate a review.</p>';
+    return;
+  }
+  const loading = document.getElementById('loading');
+  loading.style.display = 'flex';
+  try {
+    const saved = await api.getGeneratedReview(currentPdfId);
+    if (!saved || saved.empty || !saved.review_text) {
+      container.innerHTML = '<p class="empty-state">No review yet. Click Generate Review to draft one.</p>';
+    } else {
+      renderReviewEditor(saved);
+    }
+  } catch (err) {
+    container.innerHTML = '<p class="error-state">Failed to load review. Is the backend running?</p>';
+    console.error('PDF Converser sidebar error:', err);
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+// Live streaming view rendered into the Review tab: a dim Thinking feed
+// (revealed once reasoning arrives) above a read-only output preview. Returns an
+// update(payload) function; DOM writes are throttled to one per animation frame.
+function renderReviewStreaming() {
+  const container = document.getElementById('review-container');
+  container.innerHTML = `
+    <div class="loading" style="padding: 4px 0 12px;">
+      <div class="spinner"></div>
+      <span>Generating review…</span>
+    </div>
+    <details class="review-thinking-wrap" hidden>
+      <summary>Thinking</summary>
+      <div class="review-thinking"></div>
+    </details>
+    <div class="review-stream-output" placeholder="The review will appear here as it is written…"></div>
+  `;
+  const thinkWrap = container.querySelector('.review-thinking-wrap');
+  const thinkEl = container.querySelector('.review-thinking');
+  const outEl = container.querySelector('.review-stream-output');
+
+  let latest = { thinking: '', text: '' };
+  let scheduled = false;
+  const flush = () => {
+    scheduled = false;
+    if (latest.thinking) {
+      if (thinkWrap.hidden) { thinkWrap.hidden = false; thinkWrap.open = true; }
+      thinkEl.textContent = latest.thinking;
+      thinkEl.scrollTop = thinkEl.scrollHeight;
+    }
+    outEl.textContent = latest.text;
+    outEl.scrollTop = outEl.scrollHeight;
+  };
+  return (payload) => {
+    latest = payload || latest;
+    if (!scheduled) { scheduled = true; requestAnimationFrame(flush); }
+  };
+}
+
+async function runGenerateReview() {
+  if (!currentPdfId) { alert('Open a PDF first.'); return; }
+  if (reviewGenerating) return;
+  if (currentTab !== 'review') switchTab('review');
+
+  reviewGenerating = true;
+  const genBtn = document.getElementById('generate-review-btn');
+  if (genBtn) genBtn.disabled = true;
+
+  const update = renderReviewStreaming();
+  // Subscribe before kicking off generation so no early chunks are missed.
+  stopReviewStream();
+  reviewStreamHandler = (e) => update(e.detail);
+  window.addEventListener('pdfc-review-chunk', reviewStreamHandler);
+
+  try {
+    const result = await window.desktop.generateReview(currentPdfId);
+    stopReviewStream();
+    // Ask where to save; default to the previously chosen path or <paper>_review.md.
+    const def = result.review_file_path || `${notesFilenameBase()}_review.md`;
+    const path = await window.desktop.chooseSavePath(def);
+    if (path) {
+      const saved = await api.saveGeneratedReview(currentPdfId, result.review_text, path);
+      renderReviewEditor(saved);
+    } else {
+      // Cancelled the save dialog — show the draft unsaved; Save will prompt.
+      renderReviewEditor(result);
+    }
+  } catch (err) {
+    stopReviewStream();
+    const msg = String(err?.message || err);
+    const container = document.getElementById('review-container');
+    if (/not configured/i.test(msg)) {
+      container.innerHTML = '<p class="error-state">No LLM is configured for review generation. Open Settings → Review (or Text Processing) and add an API key for the chosen provider.</p>';
+    } else if (/document text/i.test(msg)) {
+      container.innerHTML = '<p class="error-state">Document text is not available yet. Make sure the PDF has fully loaded, then try again.</p>';
+    } else {
+      container.innerHTML = `<p class="error-state">Generation failed: ${escapeHtml(msg)}</p>`;
+    }
+  } finally {
+    reviewGenerating = false;
+    if (genBtn) genBtn.disabled = false;
+  }
+}
+
+// Editable draft view: textarea + meta (timestamp / saved path) + Save / Copy.
+// Save writes the textarea content to the paper's review file (prompting for a
+// location the first time), overwriting it.
+function renderReviewEditor(saved) {
+  const container = document.getElementById('review-container');
+  const reviewText = saved.review_text || '';
+  const filePath = saved.review_file_path || '';
+
+  const metaBits = [];
+  if (saved.generated_at) metaBits.push(`Generated: ${formatTime(saved.generated_at)}`);
+  if (filePath) metaBits.push(`Saved to: ${escapeHtml(filePath)}`);
+  const metaLine = metaBits.length ? `<div class="review-meta">${metaBits.join(' · ')}</div>` : '';
+  const missingLine = saved.file_missing
+    ? `<div class="review-error">The saved file could not be found (moved or deleted). Showing the last cached copy — click Save to write it again.</div>`
+    : '';
+  const unsavedLine = (!filePath)
+    ? `<div class="review-meta">Not saved to a file yet — click Save to choose a location.</div>`
+    : '';
+  const emptyNotesLine = (saved.note_count === 0)
+    ? `<div class="review-empty">Generated without any annotations — add notes for a more grounded review.</div>`
+    : '';
+
+  container.innerHTML = `
+    ${metaLine}
+    ${missingLine}
+    ${unsavedLine}
+    ${emptyNotesLine}
+    <textarea class="generated-review-edit" spellcheck="false">${escapeHtml(reviewText)}</textarea>
+    <div class="review-editor-actions">
+      <button class="toolbar-btn review-copy-btn">Copy</button>
+      <button class="toolbar-btn review-primary review-save-btn" disabled>Save</button>
+    </div>
+  `;
+
+  const textarea = container.querySelector('.generated-review-edit');
+  const saveBtn = container.querySelector('.review-save-btn');
+  // Edits enable Save; the latest text is always read live from the textarea.
+  textarea.addEventListener('input', () => {
+    saveBtn.disabled = textarea.value === reviewText;
+    saveBtn.textContent = 'Save';
+  });
+
+  const copyBtn = container.querySelector('.review-copy-btn');
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(textarea.value);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    } catch {
+      alert('Copy failed.');
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    let path = filePath;
+    if (!path) {
+      path = await window.desktop.chooseSavePath(`${notesFilenameBase()}_review.md`);
+      if (!path) return; // cancelled
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    try {
+      const updated = await api.saveGeneratedReview(currentPdfId, textarea.value, path);
+      // Re-render from the saved record so the baseline tracks the new text.
+      renderReviewEditor(updated);
+    } catch (err) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+      alert(`Save failed: ${err?.message || err}`);
+    }
+  });
 }
 
 function escapeHtml(str) {

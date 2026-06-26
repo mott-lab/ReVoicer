@@ -8,6 +8,7 @@ const { getRecentFiles } = require('./services/recent-files');
 const PROJECT_ROOT = __dirname;
 const START_HTML = path.join(__dirname, 'start.html');
 const SETTINGS_HTML = path.join(__dirname, 'settings.html');
+const APP_ICON = path.join(__dirname, 'icon', 'noun-transcript-2989894-FFB258.png');
 
 // All app and PDF resources are served under a single privileged scheme so
 // the renderer runs with the default `webSecurity: true`. Single-host
@@ -68,6 +69,7 @@ function createWindow() {
     width: 1400,
     height: 900,
     title: 'PDF Converser',
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: false,
@@ -89,20 +91,53 @@ function createWindow() {
   mainWindow.loadFile(START_HTML);
 }
 
+// Remember the Settings window size/position across runs.
+function settingsWindowStatePath() {
+  return path.join(app.getPath('userData'), 'settings-window.json');
+}
+function readSettingsWindowState() {
+  try {
+    return JSON.parse(require('node:fs').readFileSync(settingsWindowStatePath(), 'utf-8'));
+  } catch { return null; }
+}
+function writeSettingsWindowState(state) {
+  try {
+    require('node:fs').writeFileSync(settingsWindowStatePath(), JSON.stringify(state), 'utf-8');
+  } catch { /* best effort */ }
+}
+
 function openSettingsWindow() {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
     return;
   }
+
+  const saved = readSettingsWindowState();
+  let bounds;
+  if (saved && saved.width && saved.height) {
+    bounds = { width: saved.width, height: saved.height };
+    if (Number.isInteger(saved.x) && Number.isInteger(saved.y)) { bounds.x = saved.x; bounds.y = saved.y; }
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    // Default to nearly the full main-window area, centered over it.
+    const b = mainWindow.getBounds();
+    const width = Math.round(b.width * 0.92);
+    const height = Math.round(b.height * 0.92);
+    bounds = { width, height, x: b.x + Math.round((b.width - width) / 2), y: b.y + Math.round((b.height - height) / 2) };
+  } else {
+    bounds = { width: 1000, height: 760 };
+  }
+
   settingsWindow = new BrowserWindow({
-    width: 580,
-    height: 560,
+    ...bounds,
+    minWidth: 520,
+    minHeight: 480,
     parent: mainWindow || undefined,
     modal: false,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
     title: 'Settings',
+    icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: false,
@@ -110,8 +145,20 @@ function openSettingsWindow() {
       sandbox: false,
     },
   });
+  if (saved && saved.isMaximized) settingsWindow.maximize();
   settingsWindow.setMenuBarVisibility(false);
   settingsWindow.loadFile(SETTINGS_HTML);
+
+  // Persist the size/position the user left it at (use the un-maximized rect so
+  // a maximized window restores to a sensible size next time).
+  settingsWindow.on('close', () => {
+    if (!settingsWindow || settingsWindow.isDestroyed()) return;
+    const b = settingsWindow.getNormalBounds();
+    writeSettingsWindowState({
+      x: b.x, y: b.y, width: b.width, height: b.height,
+      isMaximized: settingsWindow.isMaximized(),
+    });
+  });
   settingsWindow.on('closed', () => { settingsWindow = null; });
 }
 
@@ -221,7 +268,49 @@ ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
   const { testConnection } = require('./services/llm-service');
   return testConnection(provider, params || {});
 });
+
+// Folder/file pickers used by the Settings window (e.g. the Review tab's
+// example-reviews folder and instructions file). Parent the dialog to whichever
+// window invoked it so it's modal to Settings, not the main window.
+async function pickPath(event, properties, filters) {
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const opts = { properties };
+  if (filters) opts.filters = filters;
+  const result = parent
+    ? await dialog.showOpenDialog(parent, opts)
+    : await dialog.showOpenDialog(opts);
+  if (result.canceled || result.filePaths.length === 0) return '';
+  return result.filePaths[0];
+}
+ipcMain.handle('desktop:selectDirectory', (e) => pickPath(e, ['openDirectory']));
+ipcMain.handle('desktop:selectFile', (e) =>
+  pickPath(e, ['openFile'], [{ name: 'Text', extensions: ['txt', 'md'] }]));
+
+// Native "Save As" dialog for the generated review file. Returns the chosen
+// absolute path, or '' if cancelled.
+ipcMain.handle('desktop:chooseSavePath', async (e, defaultPath) => {
+  const parent = BrowserWindow.fromWebContents(e.sender);
+  const opts = { filters: [{ name: 'Markdown', extensions: ['md'] }] };
+  if (defaultPath) opts.defaultPath = defaultPath;
+  const result = parent
+    ? await dialog.showSaveDialog(parent, opts)
+    : await dialog.showSaveDialog(opts);
+  return result.canceled ? '' : (result.filePath || '');
+});
 ipcMain.handle('api:request', (_event, req) => apiStub.handleRequest(req));
+
+// Streaming review generation: runs the LLM with a streaming callback, relaying
+// each {thinking, text} snapshot to the renderer as a `desktop:reviewChunk`
+// event, and resolves with the saved record when done. Errors reject the invoke.
+ipcMain.handle('desktop:generateReview', (e, pdfIdentifier) => {
+  const { generateReview } = require('./services/review-generate-service');
+  return generateReview({
+    pdfIdentifier,
+    onChunk: (payload) => {
+      if (!e.sender.isDestroyed()) e.sender.send('desktop:reviewChunk', payload);
+    },
+  });
+});
 ipcMain.handle('desktop:openExternal', (_e, url) => {
   // Only allow web URLs — never let arbitrary input invoke shell with file://
   // or custom-scheme handlers.

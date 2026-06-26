@@ -39,73 +39,161 @@ function _missing(field) {
   return err;
 }
 
-async function chat({ system, user, temperature = 0.3 }) {
+// Extended thinking is available on Claude 3.7 and Claude 4.x (opus/sonnet).
+// Haiku models do not support it. Used to decide whether to request a thinking
+// stream when surfacing reasoning to the UI.
+function anthropicSupportsThinking(model) {
+  return /claude-(3-7|opus-4|sonnet-4)/i.test(String(model || ''));
+}
+
+// `provider`, `model`, `maxTokens`, and `creds` are optional overrides. When
+// `provider` is omitted, the configured `text_provider` is used (default
+// behavior for cleanup/organize/Q&A). The Review feature passes overrides to
+// draft with a different provider/model and a larger token budget. `creds`
+// (when present) supplies that provider's credentials — the Review tab keeps
+// its own keys/base URLs separate from Text Processing; each field falls back
+// to the matching text setting when not provided.
+// When `onEvent` is provided, the response is streamed and `onEvent({ type:
+// 'thinking' | 'text', delta })` fires for each chunk as it arrives; the
+// assembled text is still returned. Thinking deltas only appear when the
+// provider/model emits reasoning (Anthropic extended thinking, Ollama reasoning
+// models). Without `onEvent`, the original non-streaming path runs unchanged.
+async function chat({ system, user, temperature = 0.3, provider, model, maxTokens = 1024, creds, onEvent }) {
   const s = getSettingsStore().get();
-  const provider = s.text_provider || 'openai';
+  provider = provider || s.text_provider || 'openai';
+  const cred = (field) => (creds && creds[field] != null && creds[field] !== '' ? creds[field] : s[field]);
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
 
-  if (provider === 'openai') {
-    if (!s.openai_api_key) throw _missing('OpenAI API key');
-    const client = _openaiClient(s.openai_api_key, s.openai_base_url || undefined);
-    const resp = await client.chat.completions.create({
-      model: s.openai_model || 'gpt-4o-mini',
-      temperature,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    });
-    return resp.choices?.[0]?.message?.content?.trim() || '';
-  }
+  if (provider === 'openai' || provider === 'openai_compat') {
+    let apiKey, baseURL, useModel;
+    if (provider === 'openai') {
+      apiKey = cred('openai_api_key');
+      if (!apiKey) throw _missing('OpenAI API key');
+      baseURL = cred('openai_base_url') || undefined;
+      useModel = model || s.openai_model || 'gpt-4o-mini';
+    } else {
+      baseURL = cred('openai_compat_base_url');
+      if (!baseURL) throw _missing('OpenAI-compatible base URL');
+      useModel = model || s.openai_compat_model;
+      if (!useModel) throw _missing('OpenAI-compatible model');
+      // Some local endpoints accept any non-empty key (or none). Default to a
+      // placeholder so the SDK doesn't error before the request is sent.
+      apiKey = cred('openai_compat_api_key') || 'sk-noop';
+    }
+    const client = _openaiClient(apiKey, baseURL);
+    const params = { model: useModel, temperature, max_tokens: maxTokens, messages };
 
-  if (provider === 'openai_compat') {
-    if (!s.openai_compat_base_url) throw _missing('OpenAI-compatible base URL');
-    if (!s.openai_compat_model) throw _missing('OpenAI-compatible model');
-    // Some local endpoints accept any non-empty key (or none). Default to a
-    // placeholder so the SDK doesn't error before the request is sent.
-    const client = _openaiClient(s.openai_compat_api_key || 'sk-noop', s.openai_compat_base_url);
-    const resp = await client.chat.completions.create({
-      model: s.openai_compat_model,
-      temperature,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    });
+    if (onEvent) {
+      const stream = await client.chat.completions.create({ ...params, stream: true });
+      let text = '';
+      for await (const chunk of stream) {
+        const d = chunk.choices?.[0]?.delta || {};
+        // Some OpenAI-compatible reasoning endpoints expose a reasoning stream.
+        const r = d.reasoning_content || d.reasoning;
+        if (r) onEvent({ type: 'thinking', delta: r });
+        if (d.content) { text += d.content; onEvent({ type: 'text', delta: d.content }); }
+      }
+      return text.trim();
+    }
+    const resp = await client.chat.completions.create(params);
     return resp.choices?.[0]?.message?.content?.trim() || '';
   }
 
   if (provider === 'anthropic') {
-    if (!s.anthropic_api_key) throw _missing('Anthropic API key');
-    const client = _anthropicClientFor(s.anthropic_api_key);
-    const resp = await client.messages.create({
-      model: s.anthropic_model || 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      temperature,
+    const apiKey = cred('anthropic_api_key');
+    if (!apiKey) throw _missing('Anthropic API key');
+    const client = _anthropicClientFor(apiKey);
+    const amodel = model || s.anthropic_model || 'claude-haiku-4-5-20251001';
+    // Only enable extended thinking when streaming to the UI (review) and the
+    // model supports it — keeps cleanup/organize/Q&A behavior and cost unchanged.
+    const useThinking = !!onEvent && anthropicSupportsThinking(amodel);
+    const params = {
+      model: amodel,
+      // Thinking requires max_tokens > budget_tokens, and temperature must be 1.
+      max_tokens: useThinking ? Math.max(maxTokens, 8192) : maxTokens,
+      temperature: useThinking ? 1 : temperature,
       system,
       messages: [{ role: 'user', content: user }],
-    });
-    // Response content is an array of blocks; concat text blocks.
-    const text = (resp.content || [])
+    };
+    if (useThinking) params.thinking = { type: 'enabled', budget_tokens: 2048 };
+
+    if (onEvent) {
+      const stream = client.messages.stream(params);
+      let text = '';
+      for await (const event of stream) {
+        if (event.type !== 'content_block_delta') continue;
+        const delta = event.delta || {};
+        if (delta.type === 'thinking_delta' && delta.thinking) {
+          onEvent({ type: 'thinking', delta: delta.thinking });
+        } else if (delta.type === 'text_delta' && delta.text) {
+          text += delta.text;
+          onEvent({ type: 'text', delta: delta.text });
+        }
+      }
+      await stream.finalMessage();
+      return text.trim();
+    }
+    const resp = await client.messages.create(params);
+    return (resp.content || [])
       .filter((b) => b.type === 'text')
       .map((b) => b.text)
       .join('')
       .trim();
-    return text;
   }
 
   if (provider === 'ollama') {
-    const base = (s.ollama_base_url || 'http://localhost:11434').replace(/\/$/, '');
+    const base = (cred('ollama_base_url') || 'http://localhost:11434').replace(/\/$/, '');
+    const useModel = model || s.ollama_model || 'llama3.2';
+
+    if (onEvent) {
+      // `think: true` asks reasoning models to emit a separate `thinking` field.
+      // Older Ollama / non-reasoning models reject it, so retry without on error.
+      const post = (think) => fetch(`${base}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: useModel, stream: true, think,
+          options: { temperature, num_predict: maxTokens }, messages,
+        }),
+      });
+      let resp = await post(true);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        if (/think/i.test(errText)) resp = await post(false);
+        else throw new Error(`Ollama error ${resp.status}: ${errText}`);
+      }
+      if (!resp.ok) throw new Error(`Ollama error ${resp.status}: ${await resp.text()}`);
+
+      let text = '', buf = '';
+      const decoder = new TextDecoder();
+      for await (const chunk of resp.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (!line) continue;
+          let obj;
+          try { obj = JSON.parse(line); } catch { continue; }
+          const m = obj.message || {};
+          if (m.thinking) onEvent({ type: 'thinking', delta: m.thinking });
+          if (m.content) { text += m.content; onEvent({ type: 'text', delta: m.content }); }
+        }
+      }
+      return text.trim();
+    }
+
     const resp = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: s.ollama_model || 'llama3.2',
+        model: useModel,
         stream: false,
-        options: { temperature },
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
+        options: { temperature, num_predict: maxTokens },
+        messages,
       }),
     });
     if (!resp.ok) throw new Error(`Ollama error ${resp.status}: ${await resp.text()}`);
@@ -201,6 +289,15 @@ async function testConnection(provider, params) {
       return testAnthropic({ apiKey: params.anthropic_api_key, model: params.anthropic_model });
     case 'ollama':
       return testOllama({ baseURL: params.ollama_base_url });
+    // Review tab keeps its own credentials (review_* fields).
+    case 'review_openai':
+      return testOpenAI({ apiKey: params.review_openai_api_key, baseURL: params.review_openai_base_url || undefined });
+    case 'review_openai_compat':
+      return testOpenAI({ apiKey: params.review_openai_compat_api_key || 'sk-noop', baseURL: params.review_openai_compat_base_url });
+    case 'review_anthropic':
+      return testAnthropic({ apiKey: params.review_anthropic_api_key, model: params.review_anthropic_model });
+    case 'review_ollama':
+      return testOllama({ baseURL: params.review_ollama_base_url });
     default:
       return { ok: false, message: `Unknown provider: ${provider}` };
   }

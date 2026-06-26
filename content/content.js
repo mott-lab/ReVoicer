@@ -1064,7 +1064,10 @@ function renderCitationResult(number, result) {
       ${authors ? `<p class="pcr-citation-meta">${escapeHtml(authors)}</p>` : ''}
       ${venueLine ? `<p class="pcr-citation-meta">${escapeHtml(venueLine)}</p>` : ''}
       ${result.abstract
-        ? `<p class="pcr-citation-abstract">${escapeHtml(result.abstract)}</p>`
+        ? `<p class="pcr-citation-abstract">${escapeHtml(result.abstract)}</p>${
+          result.abstract_source === 'openalex'
+            ? '<p class="pcr-citation-source">Abstract via OpenAlex</p>'
+            : ''}`
         : '<p class="pcr-citation-empty">No abstract available.</p>'}`;
   } else if (result?.status === 'not_found') {
     body.innerHTML = `
