@@ -12,6 +12,13 @@ async function transcribeAudio({ data, type, name }) {
   const settings = getSettingsStore().get();
   const provider = settings.speech_provider || 'openai_whisper';
 
+  // Offline mode: never hit the cloud. The renderer normally intercepts
+  // transcribe requests itself (preload.js), so this is a safety net; the
+  // empty text makes content.js fall back to the live (Vosk) transcript.
+  if (settings.offline_mode) {
+    return { text: '', skipped: 'offline' };
+  }
+
   // 'local_whisper' is handled in the renderer (see preload.js's
   // tryLocalWhisper); if it ever reaches here it's a misroute, fall through
   // to a safe empty response. 'off' and the legacy 'browser' value resolve

@@ -561,7 +561,12 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
     const preview = note.cleaned_comment.length > 70
       ? note.cleaned_comment.substring(0, 70) + '...'
       : note.cleaned_comment;
-    showToast(`[${typeLabel}] ${preview}`, 'success');
+    // Pending notes carry a placeholder type, so don't show it as a real label.
+    if (note.cleanup_status === 'pending') {
+      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
+    } else {
+      showToast(`[${typeLabel}] ${preview}`, 'success');
+    }
 
     // Add to cache and render highlight immediately
     cachedNotes.push(note);
@@ -601,7 +606,11 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
     const preview = note.cleaned_comment.length > 70
       ? note.cleaned_comment.substring(0, 70) + '...'
       : note.cleaned_comment;
-    showToast(`[${typeLabel}] ${preview}`, 'success');
+    if (note.cleanup_status === 'pending') {
+      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
+    } else {
+      showToast(`[${typeLabel}] ${preview}`, 'success');
+    }
 
     cachedNotes.push(note);
     if (note.highlight_data) renderNoteHighlight(note);

@@ -109,7 +109,9 @@ async function generateReview({ pdfIdentifier, onChunk }) {
     ? rubricItems.map((it) => `- ${it.section}: ${it.description}`).join('\n')
     : '';
 
-  const examples = await readExamples(s.review_examples_dir);
+  const examples = s.review_use_examples === false
+    ? []
+    : await readExamples(s.review_examples_dir);
   const instructions = resolveInstructions(s);
   const styleGuide = (s.review_style_guide || '').trim();
 

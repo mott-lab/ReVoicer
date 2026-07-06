@@ -15,6 +15,11 @@ const DEFAULTS = {
   text_provider: 'openai',           // 'openai' | 'anthropic' | 'ollama' | 'openai_compat'
   cleanup_enabled: true,             // run LLM rewrite on note creation
 
+  // Manual offline mode: no LLM calls at all (notes saved raw and marked
+  // cleanup_status='pending'), voice transcription forced onto local paths
+  // (Local Whisper if its model is cached, else the bundled Vosk transcript).
+  offline_mode: false,
+
   // Speech-to-text mode for voice annotations.
   // 'vosk' uses the bundled Vosk model for the final transcript (raw,
   // lowercase, no punctuation) — pair with cleanup_enabled=false to keep
@@ -63,7 +68,8 @@ const DEFAULTS = {
   review_openai_compat_api_key: '',
   review_openai_compat_model: '',
 
-  review_examples_dir: '',           // folder of .txt/.md example reviews (few-shot)
+  review_examples_dir: '',
+  review_use_examples: true,         // read example reviews from review_examples_dir           // folder of .txt/.md example reviews (few-shot)
   review_instructions: 'Write a review for the academic research manuscript. Use any note contents and rubric provided.',
   review_style_guide: '',            // voice/tone/formatting guidance for the review
 

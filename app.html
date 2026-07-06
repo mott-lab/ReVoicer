@@ -121,6 +121,38 @@
     /* When speech_provider is 'off', hide the voice-annotation button on
        the floating action bar. The text-annotation button remains. */
     .speech-off #pcr-fab-mic { display: none !important; }
+
+    /* Header row: the tab bar plus the always-visible offline toggle in the
+       right corner, a small space after the Review tab. The offline-mode
+       class is synced onto <html> by preload.js from settings; clicking the
+       toggle saves the setting (see sidebar.js). */
+    .tab-row {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .tab-row .tab-bar {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    #offline-toggle {
+      flex: 0 0 auto;
+      font-size: 11px;
+      padding: 2px 10px;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+    }
+    #offline-toggle:hover { border-color: #999; color: #555; }
+    html.offline-mode #offline-toggle {
+      background: #7a4b00;
+      border-color: #7a4b00;
+      color: #ffd48a;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -160,12 +192,15 @@
   <aside id="sidebar-pane">
     <div id="app">
       <div class="sidebar-header">
-        <div class="tab-bar">
-          <button class="tab-btn active" data-tab="notes">Notes</button>
-          <button class="tab-btn" data-tab="questions">Questions</button>
-          <button class="tab-btn" data-tab="references">References</button>
-          <button class="tab-btn" data-tab="rubric">Rubric</button>
-          <button class="tab-btn" data-tab="review">Review</button>
+        <div class="tab-row">
+          <div class="tab-bar">
+            <button class="tab-btn active" data-tab="notes">Notes</button>
+            <button class="tab-btn" data-tab="questions">Questions</button>
+            <button class="tab-btn" data-tab="references">References</button>
+            <button class="tab-btn" data-tab="rubric">Rubric</button>
+            <button class="tab-btn" data-tab="review">Review</button>
+          </div>
+          <button id="offline-toggle" title="Toggle offline mode — notes are saved raw and marked pending while on">Offline</button>
         </div>
 
         <div id="notes-toolbar" class="toolbar">
@@ -178,6 +213,7 @@
           <button id="export-btn" class="toolbar-btn" title="Export as Markdown" style="display: none;">Export MD</button>
           <button id="export-json-btn" class="toolbar-btn" title="Export as JSON">Export JSON</button>
           <button id="check-review-btn" class="toolbar-btn" title="Check coverage against conference rubric">Check Review</button>
+          <button id="clean-pending-btn" class="toolbar-btn" title="Run LLM cleanup on all notes saved offline" style="display: none;">Clean pending</button>
         </div>
 
         <div id="questions-toolbar" class="toolbar" style="display: none;">

@@ -151,20 +151,23 @@ ipcRenderer.on('desktop:reviewChunk', (_e, payload) => {
 // (e.g. the auto-color toggle). Relay it onto the same-page bus that content.js
 // already listens to.
 ipcRenderer.on('desktop:settingsChanged', () => {
+  syncSettingsClasses();
   dispatchMessage({ action: 'settingsChanged' }).catch(() => {});
 });
 
-// Toggle a CSS class on <html> when speech is off so the FAB's mic button
-// can be hidden purely via stylesheet (see app.html).
-window.addEventListener('DOMContentLoaded', async () => {
+// Toggle CSS classes on <html> that mirror settings, so the stylesheet alone
+// can hide the mic button (speech off) and show the offline badge (see
+// app.html). Re-run on every settings save so toggles take effect live.
+async function syncSettingsClasses() {
   try {
     const s = await ipcRenderer.invoke('desktop:getSettings');
     const html = document.documentElement;
     if (!html) return;
-    if (s.speech_provider === 'off') html.classList.add('speech-off');
-    else html.classList.remove('speech-off');
+    html.classList.toggle('speech-off', s.speech_provider === 'off');
+    html.classList.toggle('offline-mode', s.offline_mode === true);
   } catch { /* settings unavailable on first run; fine */ }
-});
+}
+window.addEventListener('DOMContentLoaded', syncSettingsClasses);
 
 // Drag-drop: dropping a .pdf anywhere in the window opens it. Without the
 // preventDefault calls, Electron navigates the renderer to the file:// URL,
@@ -269,12 +272,34 @@ window.addEventListener('pdfc-vosk-progress', (e) => {
   }
 });
 
+// Empty-but-OK transcribe response: content.js sees no text and keeps the
+// live (Vosk) transcript it already holds — the offline fallback path.
+function softEmptyTranscript() {
+  return new Response(JSON.stringify({ text: '', skipped: 'offline' }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 async function tryLocalWhisper(body) {
+  let offline = false;
   try {
     const s = await ipcRenderer.invoke('desktop:getSettings');
-    if (s.speech_provider !== 'local_whisper') return null;
+    offline = s.offline_mode === true;
+    // Offline forces the cloud provider onto the local path; everything else
+    // (vosk/off) already skips server transcription upstream, but never let
+    // a request leave the renderer while offline.
+    const wantsLocal = s.speech_provider === 'local_whisper'
+      || (offline && s.speech_provider === 'openai_whisper');
+    if (!wantsLocal) return offline ? softEmptyTranscript() : null;
   } catch { return null; }
-  if (!window.__localWhisper) return null;
+  if (!window.__localWhisper) return offline ? softEmptyTranscript() : null;
+
+  // Offline + model not yet cached → skip the attempt entirely: avoids both a
+  // doomed slow attempt and a surprise ~75MB HuggingFace download if the
+  // machine actually still has connectivity. Vosk live transcript is used.
+  if (offline && !(await window.__localWhisper.isModelCached())) {
+    return softEmptyTranscript();
+  }
 
   const audioBuf = body?.audio || body?.audio_blob?.data;
   const type = body?.audio_blob?.type || 'audio/webm';
@@ -291,6 +316,9 @@ async function tryLocalWhisper(body) {
     });
   } catch (err) {
     hideWhisperToast();
+    // Offline: fail silently into the Vosk fallback instead of surfacing an
+    // error the user can't act on.
+    if (offline) return softEmptyTranscript();
     return new Response(JSON.stringify({
       error: `Local Whisper failed: ${err.message || err}`,
     }), { status: 500, headers: { 'Content-Type': 'application/json' } });

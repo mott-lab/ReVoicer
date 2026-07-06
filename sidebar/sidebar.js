@@ -44,6 +44,11 @@ async function init() {
     if (msg.action === 'scrollToNote') {
       scrollToAndFlashNote(msg.noteId);
     }
+    // Settings saved (e.g. offline mode toggled) — refresh the notes view so
+    // the "Clean pending" button state reflects the new mode.
+    if (msg.action === 'settingsChanged') {
+      if (currentTab === 'notes') loadNotes();
+    }
     if (msg.action === 'tabChanged') {
       const newId = msg.pdfIdentifier;
       if (newId && newId !== currentPdfId) {
@@ -98,6 +103,23 @@ async function init() {
   // pasted conference rubric. The last rubric + result is persisted per
   // PDF, so reopening shows the previous state and a Re-check button.
   document.getElementById('check-review-btn').addEventListener('click', openReviewCheckModal);
+
+  // Clean pending button — LLM-cleans notes that were saved in offline mode,
+  // one at a time. Hidden unless the current PDF has pending notes.
+  document.getElementById('clean-pending-btn').addEventListener('click', cleanAllPending);
+
+  // Offline toggle (header, right corner) — flips the offline_mode setting.
+  // The saveSettings broadcast drives everything else: preload re-syncs the
+  // offline-mode class on <html> (button styling) and the relayed
+  // settingsChanged message refreshes the notes view.
+  document.getElementById('offline-toggle').addEventListener('click', async () => {
+    try {
+      const s = await window.desktop.getSettings();
+      await window.desktop.saveSettings({ offline_mode: !s.offline_mode });
+    } catch (err) {
+      console.error('PDF Converser: failed to toggle offline mode', err);
+    }
+  });
 
   // Generate Review button (in the Review tab) — streams a full review inline,
   // then prompts for a file to save it to. Drafts from notes, rubric, and
@@ -202,9 +224,11 @@ async function loadNotes(viewMode = null) {
   try {
     if (viewMode === 'chronological') {
       const data = await api.getNotes(currentPdfId);
+      updatePendingButton(data.notes);
       renderNotesList(data.notes, container);
     } else if (viewMode === 'by-type') {
       const data = await api.getNotes(currentPdfId);
+      updatePendingButton(data.notes);
       renderNotesByType(data.notes, container);
     } else if (viewMode === 'by-section') {
       const data = await api.organizeBySection(currentPdfId);
@@ -218,6 +242,71 @@ async function loadNotes(viewMode = null) {
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
+  }
+}
+
+// Show/hide the "Clean pending (N)" toolbar button based on how many of the
+// current PDF's notes were saved in offline mode and not yet LLM-cleaned.
+// Only called from the flat views (chronological/by-type); the grouped views
+// are LLM-backed and unavailable offline anyway, so the last count stands.
+function updatePendingButton(notes) {
+  const btn = document.getElementById('clean-pending-btn');
+  if (!btn || btn.disabled) return; // don't fight the in-progress queue label
+  const count = (notes || []).filter((n) => n.cleanup_status === 'pending').length;
+  btn.style.display = count > 0 ? '' : 'none';
+  btn.textContent = `Clean pending (${count})`;
+}
+
+// Sequentially LLM-clean every pending note for the current PDF, one at a
+// time. Failures leave the note pending; an offline error (mode re-enabled
+// mid-run) stops the queue, other errors skip to the next note.
+async function cleanAllPending() {
+  if (!currentPdfId) return;
+  const btn = document.getElementById('clean-pending-btn');
+  try {
+    const s = await window.desktop?.getSettings?.();
+    if (s?.offline_mode) {
+      alert('Offline mode is on — turn it off in Settings to clean notes.');
+      return;
+    }
+  } catch { /* settings unavailable; let the server-side guard decide */ }
+
+  btn.disabled = true;
+  try {
+    const data = await api.getNotes(currentPdfId);
+    const pending = (data.notes || []).filter((n) => n.cleanup_status === 'pending');
+    let done = 0;
+    const failures = [];
+    for (const note of pending) {
+      btn.textContent = `Cleaning ${done + 1}/${pending.length}…`;
+      try {
+        await api.recleanNote(note.id, currentPdfId);
+        done++;
+        // Refresh the panel and PDF highlights per note so cleaned text/tags
+        // appear as the queue progresses, not all at once at the end.
+        // (updatePendingButton skips while this button is disabled, so the
+        // progress label above survives the reload.)
+        await loadNotes(document.getElementById('view-mode').value);
+        chrome.runtime.sendMessage({
+          action: 'notesChanged',
+          pdfIdentifier: currentPdfId,
+        }).catch(() => {});
+      } catch (err) {
+        failures.push({ note, message: err.message || String(err) });
+        if (/offline/i.test(err.message || '')) break; // mode re-enabled mid-run
+      }
+    }
+    if (failures.length) {
+      alert(`${failures.length} note(s) failed to clean and remain pending:\n${failures[0].message}`);
+    }
+  } finally {
+    btn.disabled = false;
+    loadNotes(document.getElementById('view-mode').value);
+    // Cleaning changes tags → highlight colors; tell the PDF pane to re-render.
+    chrome.runtime.sendMessage({
+      action: 'notesChanged',
+      pdfIdentifier: currentPdfId,
+    }).catch(() => {});
   }
 }
 
@@ -868,10 +957,14 @@ function renderNoteCard(note, { withActions = true } = {}) {
   const colorBtn = withActions
     ? `<button class="note-color" data-id="${note.id}" ${swatchStyle} title="Change highlight color">●</button>`
     : '';
+  const isPending = note.cleanup_status === 'pending';
+  const pendingBadge = isPending
+    ? '<span class="note-pending-badge" title="Saved offline — raw transcript, not yet cleaned">Pending cleanup</span>'
+    : '';
   const actions = withActions ? `
       <div class="note-actions">
         <button class="note-edit" data-id="${note.id}" title="Edit cleaned text">Edit</button>
-        <button class="note-reclean" data-id="${note.id}" title="Re-clean with LLM">Re-clean</button>
+        <button class="note-reclean" data-id="${note.id}" title="${isPending ? 'Clean with LLM' : 'Re-clean with LLM'}">${isPending ? 'Clean' : 'Re-clean'}</button>
         <button class="note-delete" data-id="${note.id}" title="Delete this note">Delete</button>
       </div>` : '';
   const raw = withActions ? `
@@ -886,6 +979,7 @@ function renderNoteCard(note, { withActions = true } = {}) {
         ${badges}
         ${addTagBtn}
         ${sectionPill}
+        ${pendingBadge}
         <span class="note-page">${note.page_number ? 'Page ' + note.page_number : 'Page ?'}</span>
       </div>
       <blockquote class="note-highlight">${escapeHtml(note.selected_text)}</blockquote>
@@ -922,7 +1016,9 @@ function attachNoteActionHandlers(container) {
       } catch (err) {
         btn.textContent = 'Re-clean';
         btn.disabled = false;
-        alert('Failed to re-clean note.');
+        // Surface the server message — e.g. the 503 "Offline mode is on"
+        // guard from the reclean route.
+        alert(err.message || 'Failed to clean note.');
       }
     });
   });

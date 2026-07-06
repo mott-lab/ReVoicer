@@ -1,14 +1,17 @@
 # PDF Converser
 
-Electron desktop app for reading PDFs with voice/text annotations and
-LLM-assisted Q&A across the whole document. Highlight a passage, speak or
-type your thought, and an LLM cleans it up and classifies it (summary,
-critique, strength, question, related work, suggestion, follow-up). All
-notes for a PDF travel with the document via a content-hash filename, so
-moving or renaming the file never loses its annotations.
+Electron desktop app for reading and reviewing PDFs with voice/text
+annotations, LLM-assisted Q&A across the whole document, and a
+review-writing workflow (rubrics, coverage checks, and generated review
+drafts). Highlight a passage, speak or type your thought, and an LLM
+cleans it up and classifies it (summary, critique, strength, question,
+related work, suggestion, follow-up). All notes for a PDF travel with the
+document via a content-hash filename, so moving or renaming the file
+never loses its annotations.
 
-Runs fully offline once configured with a local model provider — no
-external backend required.
+Runs fully offline once configured with a local model provider, and has a
+dedicated offline mode for working with no LLM at all — notes queue up
+and get cleaned later.
 
 ## Run
 
@@ -51,12 +54,13 @@ or text annotation workflow:
 4. The answer appears in an overlay, drawing on the full document text.
 
 The full text of each PDF is extracted and stored on first open, so Q&A
-covers the whole document, not just the highlighted passage.
+covers the whole document, not just the highlighted passage. Past
+questions and answers live in the sidebar's **Questions** tab.
 
 ### Viewing Annotations
 
-The right pane shows all annotations for the current PDF in one of four
-modes:
+The sidebar's **Notes** tab shows all annotations for the current PDF in
+one of four modes:
 
 - **By Page Order** — chronological, grouped by page number
 - **By Type** — grouped by comment tag (a multi-tagged note appears under each
@@ -65,7 +69,10 @@ modes:
   (Introduction, Methods, …)
 - **By Theme** — LLM groups by intellectual theme
 
-Click **Export MD** to download all annotations as a Markdown file.
+Each note offers inline editing of the cleaned text, tag add/remove,
+a section pill, a color swatch, delete, and a per-note **Clean /
+Re-clean** button. **Export MD** / **Export JSON** download all
+annotations; **Check Review** runs the rubric coverage check (below).
 
 ### Comment Types
 
@@ -87,20 +94,80 @@ The highlight color in the PDF tracks the primary (first) tag. To override it
 per-note, click the small color circle in the note's actions row and pick a
 different color (or **Reset** to revert to the tag color).
 
+### In-Text Citation Lookup
+
+On open, the reference list at the end of the paper is parsed
+(deterministically, no LLM) and in-text citation markers like `[3]` or
+`[1-4, 7]` become clickable. Clicking one opens a modal with the
+reference's title, authors, year, venue, and abstract, fetched from
+Semantic Scholar (OpenAlex fills in missing abstracts; a Google Scholar
+search link is the fallback), plus a **Jump to reference** button that
+scrolls to the bibliography entry. Lookups happen only on click and are
+cached per PDF.
+
+### References Tab
+
+A per-PDF list of related references (authors / title / link) you
+maintain by hand. Entries are fed to the cleanup LLM as context so
+"related work" annotations can name the right papers.
+
+### Rubric and Review Tabs
+
+For writing a structured review of the paper:
+
+- **Rubric** — build a list of rubric sections (e.g. a conference review
+  form: novelty, rigor, clarity, …) by hand, or **Paste Rubric Text** to
+  have the LLM extract structured items from a pasted form. Rubrics can
+  be saved as named templates (**Save as…**) and loaded into other
+  papers (**Load saved rubric…**).
+- **Check Review** (Notes tab toolbar) — the LLM compares your
+  annotations against the rubric and reports each component as covered /
+  partial / missing, with the supporting notes and a one-line gap
+  summary. The result is saved per PDF and can be re-run any time.
+- **Review** — **Generate Review** drafts a full review from the
+  manuscript text, your annotations, and the rubric, following the
+  instructions, style guide, and optional example reviews configured in
+  Settings. Output streams into the panel, then saves to a file of your
+  choice.
+
+## Offline Mode
+
+Toggle the **Offline** button in the sidebar header (right corner, next
+to the tabs) — or the checkbox in Settings — when working without
+connectivity. While it's on:
+
+- No LLM or cloud call is ever made (this includes local Ollama, for
+  predictability). Q&A, Organize, Check Review, Generate Review, and
+  citation lookup are unavailable and fail fast with a clear message.
+- Voice notes are transcribed locally: Local Whisper if its model is
+  already cached, otherwise the bundled Vosk live transcript. Nothing is
+  downloaded and nothing leaves the machine.
+- Notes (voice or typed) are saved with the raw transcript verbatim and
+  marked **Pending cleanup**.
+
+Back online, turn the toggle off and click **Clean pending (N)** in the
+Notes toolbar: pending notes are sent to the LLM one at a time, each card
+updating as it completes. Typed notes saved with "Clean up with LLM"
+unchecked keep their text verbatim — they only get tags and a section
+assigned. Failures leave the note pending; each note also has its own
+**Clean** button.
+
 ## Settings (`File → Settings…`, `Ctrl/Cmd+,`)
 
-Text and speech are configured independently.
+Five tabs. Text and speech are configured independently; the review
+generator has its own provider so a stronger model can draft reviews.
 
-**Text** — used for cleanup, organize, classification, and Q&A:
-- OpenAI · Anthropic · Ollama · OpenAI-compatible (Groq, OpenRouter,
-  Together, LM Studio, vLLM, llama.cpp server, …). Each provider keeps
-  its own credentials with a Test button. Ollama's Test also lists
-  installed models.
-- Global "Use LLM to clean up annotations" toggle. When off, annotations
-  are saved verbatim with a heuristic type label and no LLM call is made
-  on creation. Q&A and Organize still need a configured provider.
+**Text Processing** — used for cleanup, organize, classification, and Q&A:
+- **Offline mode** toggle (same setting as the sidebar button).
+- "Use LLM to clean up annotations" toggle. When off, annotations are
+  saved verbatim with a heuristic type label and no LLM call is made on
+  creation. Q&A and Organize still need a configured provider.
+- Provider: OpenAI · Anthropic · Ollama · OpenAI-compatible (Groq,
+  OpenRouter, Together, LM Studio, vLLM, llama.cpp server, …). Each
+  provider keeps its own credentials with a Test button that also lists
+  available models.
 
-**Speech** — for voice annotations:
+**Speech-to-Text** — for voice annotations:
 - **OpenAI Whisper** — uses the OpenAI key from the Text section.
 - **Local Whisper** — `Xenova/whisper-tiny.en` runs in the renderer via
   WebAssembly (`@huggingface/transformers`, loaded from jsdelivr).
@@ -116,6 +183,19 @@ transcript shown while recording (Electron's Chromium ships without the
 Google Speech key needed by `webkitSpeechRecognition`). The model is
 preloaded in the background at startup so the first mic click is instant.
 
+**Review** — provider/model/credentials for review generation (an
+Autofill button copies the Text Processing keys), plus review guidance:
+- "Use example reviews to guide generation" toggle — when off, the
+  examples folder below is kept but ignored.
+- Example reviews folder — .txt/.md files whose structure and voice the
+  drafted review imitates.
+- Instructions and writing style guide textareas.
+
+**References** — optional Semantic Scholar API key for citation lookups
+(the keyless shared pool works at low volume; a key raises rate limits).
+
+**User Interface** — auto-color highlights by comment type.
+
 ## Note Storage
 
 Annotations are stored as JSON files under the OS-standard per-user app
@@ -126,8 +206,20 @@ data directory:
 - Linux: `~/.config/pdf-converser-desktop/notes/`
 
 Each PDF gets its own files, named by the SHA-256 hash of the first 64KB
-of its content (`{hash}.json` for notes, `{hash}.text.json` for the
-extracted full text, `{hash}.qa.json` for Q&A history). This means:
+of its content:
+
+- `{hash}.json` — notes
+- `{hash}.text.json` — extracted full text
+- `{hash}.qa.json` — Q&A history
+- `{hash}.refs.json` — user references
+- `{hash}.rubric.json` — rubric items
+- `{hash}.review.json` — rubric coverage check
+- `{hash}.review-draft.json` — generated review draft
+- `{hash}.citations.json` — parsed citations + lookup cache
+
+`rubric-templates.json` (named reusable rubrics) lives alongside them;
+`recent-files.json` and `settings.json` sit at the `userData` root. This
+scheme means:
 
 - **Rename-proof** — moving or renaming a PDF doesn't lose its notes;
   same content always produces the same hash.
@@ -142,24 +234,30 @@ extracted full text, `{hash}.qa.json` for Q&A history). This means:
   registers the `pdfc://` protocol handler, and dispatches IPC.
 - `preload.js` — Exposes `window.desktop` (settings, IPC), shims the
   `chrome.*` APIs the renderer scripts under `viewer/`, `content/`,
-  `sidebar/`, and `lib/` still use, and intercepts every `fetch` to
-  `http://localhost:8000/api/*` to route through `api-stub.js`.
+  `sidebar/`, and `lib/` still use, intercepts every `fetch` to
+  `http://localhost:8000/api/*` to route through `api-stub.js`, and
+  handles local-Whisper routing plus offline-mode gating for transcription.
 - `app.html` — Split-pane layout: PDF viewer on the left, notes/Q&A
   sidebar on the right. Loads the renderer scripts plus the speech
   runtimes under `services/`.
-- `start.html` — Initial blank window with an Open button.
-- `settings.html` — Settings UI (text + speech).
-- `api-stub.js` — In-process router for the 13 backend HTTP routes the
-  renderer fetches at `http://localhost:8000/api/*`.
+- `start.html` — Initial window with an Open button and recent files.
+- `settings.html` — Settings UI (five tabs, see above).
+- `api-stub.js` — In-process router for the ~35 backend HTTP routes the
+  renderer fetches at `http://localhost:8000/api/*` (notes, Q&A,
+  organize, export, transcribe, references, rubric + templates, review
+  check, review generate, citations).
 
 ### Renderer (`viewer/`, `content/`, `sidebar/`, `lib/`)
 
-- `viewer/` — pdf.js wrapper plus the toolbar/page CSS. `viewer/pdfjs/`
-  vendors `pdf.min.mjs` and `pdf.worker.min.mjs`.
+- `viewer/` — pdf.js wrapper plus the toolbar/page CSS and in-PDF find
+  bar (`Ctrl+F`). `viewer/pdfjs/` vendors `pdf.min.mjs` and
+  `pdf.worker.min.mjs`.
 - `content/` — selection detection, floating action button, voice
-  recording overlay, in-PDF highlight rendering.
-- `sidebar/` — notes list, organization views (page / type / section /
-  theme), question history, Markdown export.
+  recording overlay, in-PDF highlight rendering, citation markers +
+  lookup modal.
+- `sidebar/` — the five tabs (notes list with four organization views,
+  questions, references, rubric, review), offline toggle, pending-notes
+  queue, Markdown/JSON export.
 - `lib/` — shared modules: `api-client.js` (fetch wrapper for the
   in-process API), `speech.js` (`SpeechCapture` — MediaRecorder + live
   transcript via Vosk), `pdf-identifier.js` (content hash + page
@@ -168,22 +266,33 @@ extracted full text, `{hash}.qa.json` for Q&A history). This means:
 ### Services (in-process equivalents of the old Python backend)
 
 `services/` holds the implementations behind `api-stub.js`. Same on-disk
-schema (`{hash}.json`, `{hash}.text.json`, `{hash}.qa.json`) as the
-previous Python backend, so existing notes can be migrated by copy.
+schema as the previous Python backend, so existing notes can be migrated
+by copy.
 
-- `note-store.js`, `document-store.js`, `qa-store.js` — fs-backed
-  persistence under `app.getPath('userData')/notes/`.
-- `cleanup-service.js`, `organize-service.js`, `qa-service.js`,
-  `transcribe-service.js` — LLM-driven note cleanup, grouping, document
-  Q&A, and audio transcription.
+- Stores (fs-backed persistence under `app.getPath('userData')/notes/`):
+  `note-store.js`, `document-store.js`, `qa-store.js`,
+  `references-store.js`, `rubric-store.js`, `rubric-templates-store.js`,
+  `citations-store.js`, `review-check-store.js`,
+  `review-generate-store.js`.
+- LLM-driven: `cleanup-service.js` (note cleanup + multi-tag/section
+  classification), `organize-service.js` (grouping), `qa-service.js`
+  (document Q&A), `rubric-extract-service.js` (parse pasted rubric
+  text), `review-check-service.js` (rubric coverage judgment),
+  `review-generate-service.js` (streamed review drafting).
+- Citations: `citation-extract-service.js` (deterministic bibliography
+  parsing), `scholar-lookup-service.js` (Semantic Scholar metadata),
+  `openalex-service.js` (abstract fallback), `reference-parse.js`
+  (DOI/arXiv/title extraction helpers).
+- `transcribe-service.js` — speech-to-text routing (cloud Whisper path).
 - `export-service.js` — Markdown export.
 - `llm-service.js` — provider-agnostic `chat()` wrapper. OpenAI &
   OpenAI-compatible via the `openai` SDK; Anthropic via
   `@anthropic-ai/sdk`; Ollama via plain `fetch` to its `/api/chat`.
+  Blocks every call while offline mode is on.
 - `settings-store.js` — settings persistence + migration of legacy fields.
 - `recent-files.js` — JSON-backed recent-PDFs list.
 - `local-whisper-runtime.js` — renderer-side, exposes
-  `window.__localWhisper.transcribe(blob)`.
+  `window.__localWhisper` (`transcribe(blob)`, `isModelCached()`).
 - `vosk-runtime.js` — renderer-side, exposes `window.__voskRecognition`
   (a `SpeechRecognition`-shaped class). The bundled model is loaded
   from `pdfc://local/app/models/…` so the app stays offline.
@@ -202,49 +311,27 @@ Not currently implemented; tracked here for future development.
 ### Full-Document Context Extensions
 
 The full PDF text is already extracted page-by-page on every open and is
-used for Q&A. Other features can build on this stored text:
+used for Q&A, cleanup context, and review generation. Other features can
+build on this stored text:
 
 - **Cross-referencing** — when you comment on a result, the LLM links it
   back to the method or measure that produced it. Comment on a claim in
   the Discussion and it finds the supporting data in Results.
-- **Context-aware annotation cleanup** — include document context in the
-  cleanup prompt so the LLM resolves ambiguous references and classifies
-  comment types more accurately.
 - **Accurate section detection** — use real section headers from the
   full text to make the "By Section" view exact instead of guessing
   from note snippets.
-- **Citation-aware related work** — when you make a "related work"
-  annotation, surface the matching citation from the references section.
 - **Auto-generated paper summary** — produce a structured summary of the
   paper to provide context alongside annotations in exports.
 - **RAG for long documents** — add embedding-based retrieval for papers
   that exceed the LLM's context window.
 
-### Review-Oriented Export
+### Notes-Oriented Export
 
-Add export templates tailored to specific workflows:
-
-- **Review export** — generate a structured review (Summary, Strengths,
-  Weaknesses with subsections), using `review-examples/` as style/tone
-  references so the output matches the user's writing voice.
-- **Notes export** — organize annotations by topic/theme for personal
-  reference. The "By Theme" view + Markdown export covers part of this;
-  a dedicated notes-oriented template could improve the structure.
-
-### Review Rubric Upload & Coverage Check
-
-Allow users to upload review instructions/rubrics (e.g. a conference
-review form covering novelty, rigor, clarity, related work,
-reproducibility):
-
-- **Coverage report** — compare existing annotations against the
-  rubric's categories, highlight under-addressed dimensions. Available
-  as a sidebar button at any time.
-- **Export-time coverage check** — when a rubric is uploaded, run the
-  coverage check on **Export** and surface gaps before exporting.
-- **Structured review generation** — organize the review export by the
-  rubric's categories rather than a generic format.
+Organize annotations by topic/theme for personal reference. The "By
+Theme" view + Markdown export covers part of this; a dedicated
+notes-oriented template could improve the structure.
 
 ### Review claim check
 - check each critique made in the review. if it makes some claim, is that claim appropriately supported? e.g., if it says, "there is related work on XYZ", does the review provide citations to support this? or if it says, "there is not enough engagement with the literature in this discussion section", how many references are included in that section of the text?
-
+  (The current **Check Review** feature judges rubric *coverage*; this
+  would verify the *claims* inside a drafted review.)

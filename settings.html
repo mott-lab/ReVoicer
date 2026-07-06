@@ -150,6 +150,16 @@
     <!-- ── Text Processing tab: cleanup, organize, Q&A ─────────────────── -->
     <div class="tab-panel active" data-tab="text">
     <fieldset>
+      <legend>Offline Mode</legend>
+
+      <label class="toggle">
+        <input type="checkbox" id="offline_mode">
+        <span class="toggle-label">Offline mode — no cloud or LLM calls</span>
+      </label>
+      <div class="help">Voice notes are transcribed locally (Local Whisper if its model is already cached, otherwise the bundled Vosk transcript). Notes are saved raw and marked "pending cleanup" — clean them from the sidebar when back online. Q&amp;A, Organize, Review, and citation lookup are unavailable while on.</div>
+    </fieldset>
+
+    <fieldset>
       <legend>Text Processing</legend>
 
       <label class="toggle">
@@ -345,13 +355,19 @@
     <fieldset>
       <legend>Review Guidance</legend>
 
+      <label class="toggle">
+        <input type="checkbox" id="review_use_examples">
+        <span class="toggle-label">Use example reviews to guide generation</span>
+      </label>
+      <div class="help">When off, the folder below is kept but ignored — reviews are drafted from the instructions and style guide alone.</div>
+
       <label>Example reviews folder <span style="color:#666">(optional)</span></label>
       <div class="path-row">
         <input id="review_examples_dir" type="text" readonly placeholder="(none selected)">
         <button class="small" type="button" id="pick_examples_dir">Choose…</button>
         <button class="small secondary" type="button" id="clear_examples_dir">Clear</button>
       </div>
-      <div class="help">A folder of .txt or .md example reviews. The model imitates their structure and voice (up to 3 files are used).</div>
+      <div class="help">A folder of .txt or .md example reviews. The model imitates their structure and voice (up to 20 files / 20,000 characters are used).</div>
 
       <label>Instructions</label>
       <textarea id="review_instructions" placeholder="Write a review for the academic research manuscript. Use any note contents and rubric provided."></textarea>
@@ -418,6 +434,16 @@
       if (p) $('review_examples_dir').value = p;
     });
     $('clear_examples_dir').addEventListener('click', () => { $('review_examples_dir').value = ''; });
+
+    // Dim/disable the examples-folder row when example usage is off; the
+    // path itself is preserved so re-enabling picks it right back up.
+    function syncExamplesRow() {
+      const on = $('review_use_examples').checked;
+      $('pick_examples_dir').disabled = !on;
+      $('clear_examples_dir').disabled = !on;
+      $('review_examples_dir').style.opacity = on ? '' : '0.5';
+    }
+    $('review_use_examples').addEventListener('change', syncExamplesRow);
 
     // Toggle which provider block is visible within a single tab panel. Scoped
     // by panel so the Text Processing and Review selectors don't affect each
@@ -488,6 +514,7 @@
         text_provider: document.querySelector('input[name=text_provider]:checked').value,
         speech_provider: document.querySelector('input[name=speech_provider]:checked').value,
         cleanup_enabled: $('cleanup_enabled').checked,
+        offline_mode: $('offline_mode').checked,
 
         openai_api_key: $('openai_api_key').value.trim(),
         openai_model: $('openai_model').value.trim() || 'gpt-4o-mini',
@@ -517,6 +544,7 @@
         review_openai_compat_api_key: $('review_openai_compat_api_key').value.trim(),
         review_openai_compat_model: $('review_openai_compat_model').value.trim(),
         review_examples_dir: $('review_examples_dir').value.trim(),
+        review_use_examples: $('review_use_examples').checked,
         review_instructions: $('review_instructions').value,
         review_style_guide: $('review_style_guide').value,
 
@@ -527,6 +555,7 @@
     async function load() {
       const s = await window.desktop.getSettings();
       $('cleanup_enabled').checked = s.cleanup_enabled !== false;
+      $('offline_mode').checked = s.offline_mode === true;
 
       document.querySelector(`input[name=text_provider][value="${s.text_provider}"]`)?.click();
       document.querySelector(`input[name=speech_provider][value="${s.speech_provider}"]`)?.click();
@@ -556,6 +585,8 @@
       $('review_openai_compat_api_key').value = s.review_openai_compat_api_key || '';
       $('review_openai_compat_model').value = s.review_openai_compat_model || '';
       $('review_examples_dir').value = s.review_examples_dir || '';
+      $('review_use_examples').checked = s.review_use_examples !== false;
+      syncExamplesRow();
       $('review_instructions').value = s.review_instructions || '';
       $('review_style_guide').value = s.review_style_guide || '';
 

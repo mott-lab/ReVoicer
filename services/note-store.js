@@ -11,7 +11,8 @@
 //     "pdf_url": string | null,
 //     "notes": [ { id, selected_text, page_number, raw_transcript,
 //                  cleaned_comment, comment_type, comment_tags, section,
-//                  color_override, highlight_data, created_at } ]
+//                  color_override, highlight_data, cleanup_status,
+//                  created_at } ]
 //   }
 //
 // Schema notes:
@@ -24,6 +25,14 @@
 //   (introduction/methods/results/...) or null.
 // - `color_override`: user-picked hex color (e.g. "#ffee58") or null. When
 //   null, highlight color is derived from the primary tag.
+// - `cleanup_status`: 'pending' when the note was saved in offline mode and
+//   hasn't been LLM-cleaned yet; 'done' otherwise. Older files without the
+//   field get 'done' injected on read. Manually editing a pending note's
+//   text does not clear pending — the LLM clean can still run later.
+// - `cleanup_mode`: what draining a pending note should do — 'full' (rewrite
+//   text + classify) or 'classify' (tags/section only, text stays verbatim;
+//   typed offline with "Clean up with LLM" unchecked). Older files without
+//   the field get 'full' injected on read.
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -103,6 +112,8 @@ class NoteStore {
       }
       if (!('section' in n)) n.section = null;
       if (!('color_override' in n)) n.color_override = null;
+      if (!('cleanup_status' in n)) n.cleanup_status = 'done';
+      if (!('cleanup_mode' in n)) n.cleanup_mode = 'full';
     }
     return notes;
   }
@@ -110,6 +121,7 @@ class NoteStore {
   async createNote({
     contentHash, pdfTitle, pdfUrl, selectedText, pageNumber,
     rawTranscript, cleanedComment, commentTags, section, highlightData,
+    cleanupStatus, cleanupMode,
   }) {
     const tags = Array.isArray(commentTags) && commentTags.length > 0
       ? commentTags
@@ -125,6 +137,8 @@ class NoteStore {
       section: section || null,
       color_override: null,
       highlight_data: highlightData || null,
+      cleanup_status: cleanupStatus === 'pending' ? 'pending' : 'done',
+      cleanup_mode: cleanupMode === 'classify' ? 'classify' : 'full',
       created_at: new Date().toISOString(),
     };
 

@@ -172,6 +172,25 @@ body {
   color: #4285f4;
 }
 
+/* Pending-cleanup badge: note was saved in offline mode and hasn't been
+   LLM-cleaned yet. Cleared by the per-note Clean button or the toolbar's
+   "Clean pending" queue. */
+.note-pending-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: #fff3e0;
+  color: #b26a00;
+}
+.note-card:has(.note-pending-badge) {
+  border-left: 2px solid #f0a030;
+}
+
 /* Comment Type Badges */
 .note-type-badge {
   display: inline-flex;

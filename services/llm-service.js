@@ -60,6 +60,14 @@ function anthropicSupportsThinking(model) {
 // models). Without `onEvent`, the original non-streaming path runs unchanged.
 async function chat({ system, user, temperature = 0.3, provider, model, maxTokens = 1024, creds, onEvent }) {
   const s = getSettingsStore().get();
+  if (s.offline_mode) {
+    // Blocks every LLM feature (cleanup, Q&A, organize, review, rubric parse)
+    // uniformly — including local Ollama — so offline behavior is predictable.
+    const err = new Error('Offline mode is on — LLM features are disabled. Turn it off in Settings.');
+    err.code = 'OFFLINE';
+    err.status = 503;
+    throw err;
+  }
   provider = provider || s.text_provider || 'openai';
   const cred = (field) => (creds && creds[field] != null && creds[field] !== '' ? creds[field] : s[field]);
   const messages = [

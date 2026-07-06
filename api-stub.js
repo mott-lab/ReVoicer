@@ -70,7 +70,27 @@ const routes = {
   },
 
   'POST /api/notes/': async ({ body }) => {
-    const { cleanup_enabled } = getSettingsStore().get();
+    const { cleanup_enabled, offline_mode } = getSettingsStore().get();
+    if (offline_mode) {
+      // Offline: no LLM, no heuristics — save raw and mark pending so the
+      // sidebar's "Clean pending" queue can process it once back online.
+      return getNoteStore().createNote({
+        contentHash: body.pdf_identifier,
+        pdfTitle: body.pdf_title || null,
+        pdfUrl: null,
+        selectedText: body.selected_text || '',
+        pageNumber: body.page_number || 0,
+        rawTranscript: body.raw_transcript || '',
+        cleanedComment: body.raw_transcript || '',
+        commentTags: ['summary'], // placeholder; replaced when cleaned
+        section: null,
+        highlightData: body.highlight_data || null,
+        cleanupStatus: 'pending',
+        // Typed notes with "Clean up with LLM" unchecked keep their text
+        // verbatim when the queue drains — classify (tags/section) only.
+        cleanupMode: body.skip_cleanup ? 'classify' : 'full',
+      });
+    }
     const skipRewrite = body.skip_cleanup || !cleanup_enabled;
     const pageContext = cleanup_enabled
       ? await buildPageContext(body.pdf_identifier, body.page_number)
@@ -119,11 +139,36 @@ const routes = {
   },
 
   'PUT /api/notes/:id/reclean': async ({ params, query }) => {
+    if (getSettingsStore().get().offline_mode) {
+      return {
+        __status: 503,
+        error: 'Offline mode is on — turn it off in Settings to clean notes.',
+        code: 'OFFLINE',
+      };
+    }
     const store = getNoteStore();
     const note = await store.getNote(query.pdf_identifier, params.id);
     if (!note) return { __status: 404, error: 'Note not found' };
     const pageContext = await buildPageContext(query.pdf_identifier, note.page_number);
     const references = await getReferencesStore().listReferences(query.pdf_identifier);
+
+    // Pending classify-only notes (typed offline with "Clean up with LLM"
+    // unchecked) keep their text verbatim — only tags/section are assigned.
+    // An explicit Re-clean of an already-done note is always a full clean.
+    if (note.cleanup_status === 'pending' && note.cleanup_mode === 'classify') {
+      const { tags, section } = await classifyCommentType(
+        note.selected_text || '',
+        note.raw_transcript || '',
+        pageContext,
+        references,
+      );
+      return store.updateNote(query.pdf_identifier, params.id, {
+        comment_tags: tags,
+        section,
+        cleanup_status: 'done',
+      });
+    }
+
     const { comment, tags, section } = await cleanupTranscript(
       note.selected_text || '',
       note.raw_transcript || '',
@@ -134,6 +179,7 @@ const routes = {
       cleaned_comment: comment,
       comment_tags: tags,
       section,
+      cleanup_status: 'done',
     });
   },
 

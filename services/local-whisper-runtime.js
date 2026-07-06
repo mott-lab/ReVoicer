@@ -8,7 +8,10 @@
 // We deliberately avoid bundling: no build step, no node_modules size hit.
 // Model files come from huggingface.co (CORS-friendly), runtime from jsdelivr.
 //
-// Exposes `window.__localWhisper.transcribe(blob) → {text}`.
+// Exposes `window.__localWhisper.transcribe(blob) → {text}` and
+// `window.__localWhisper.isModelCached() → boolean` (used by preload.js in
+// offline mode to decide between attempting Whisper and falling back to the
+// Vosk live transcript without triggering a model download).
 // Progress (model download + inference) is broadcast via DOM events
 // `pdfc-whisper-progress` so preload.js can render a toast without coupling
 // to this module.
@@ -103,4 +106,20 @@ async function transcribe(blob) {
   return { text: (result?.text || '').trim() };
 }
 
-window.__localWhisper = { transcribe };
+// Heuristic pre-check: has transformers.js already cached the model weights?
+// transformers.js v3 stores downloaded files in the Cache API under
+// 'transformers-cache'. Only a pre-check — the try/catch around transcribe()
+// in preload.js remains the real safety net (e.g. cached weights but an
+// uncached jsdelivr runtime import would still fail while truly offline).
+async function isModelCached() {
+  try {
+    if (!('caches' in window)) return false;
+    const cache = await caches.open('transformers-cache');
+    const keys = await cache.keys();
+    return keys.some((req) => req.url.includes(MODEL_ID) && req.url.includes('.onnx'));
+  } catch {
+    return false;
+  }
+}
+
+window.__localWhisper = { transcribe, isModelCached };
