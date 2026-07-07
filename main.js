@@ -311,6 +311,20 @@ ipcMain.handle('desktop:generateReview', (e, pdfIdentifier) => {
     },
   });
 });
+
+// Generate a review style guide from the example reviews folder. Returns a
+// result object rather than rejecting: Electron strips custom `code`/`status`
+// props from errors that cross the invoke boundary, and the Settings UI needs
+// the code to show a friendly message.
+ipcMain.handle('desktop:generateStyleGuide', async (_e, overrides) => {
+  const { generateStyleGuide } = require('./services/style-guide-service');
+  try {
+    const result = await generateStyleGuide(overrides || {});
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, code: err.code || '', message: err.message || String(err) };
+  }
+});
 ipcMain.handle('desktop:openExternal', (_e, url) => {
   // Only allow web URLs — never let arbitrary input invoke shell with file://
   // or custom-scheme handlers.

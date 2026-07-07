@@ -109,7 +109,8 @@ cached per PDF.
 
 A per-PDF list of related references (authors / title / link) you
 maintain by hand. Entries are fed to the cleanup LLM as context so
-"related work" annotations can name the right papers.
+"related work" annotations can name the right papers, and are included
+in generated reviews so they can be cited verbatim.
 
 ### Rubric and Review Tabs
 
@@ -125,10 +126,16 @@ For writing a structured review of the paper:
   partial / missing, with the supporting notes and a one-line gap
   summary. The result is saved per PDF and can be re-run any time.
 - **Review** — **Generate Review** drafts a full review from the
-  manuscript text, your annotations, and the rubric, following the
-  instructions, style guide, and optional example reviews configured in
-  Settings. Output streams into the panel, then saves to a file of your
-  choice.
+  manuscript text, your annotations, the rubric, and the References tab
+  entries (cited verbatim where relevant), following the note context,
+  additional instructions, and writing style guide configured in
+  Settings. Output streams into the panel with the model's reasoning in
+  a collapsible Thinking feed; when done, the draft opens in an editable
+  panel with the model's commentary kept in a read-only "Model
+  commentary" box above it. **Save** always opens a save dialog,
+  defaulting to `<paper>_review.md` in the same folder as the PDF. The
+  draft (and commentary) persist per PDF, and the saved `.md` file is
+  treated as the canonical copy on reload.
 
 ## Offline Mode
 
@@ -137,8 +144,9 @@ to the tabs) — or the checkbox in Settings — when working without
 connectivity. While it's on:
 
 - No LLM or cloud call is ever made (this includes local Ollama, for
-  predictability). Q&A, Organize, Check Review, Generate Review, and
-  citation lookup are unavailable and fail fast with a clear message.
+  predictability). Q&A, Organize, Check Review, Generate Review, style
+  guide generation, and citation lookup are unavailable and fail fast
+  with a clear message.
 - Voice notes are transcribed locally: Local Whisper if its model is
   already cached, otherwise the bundled Vosk live transcript. Nothing is
   downloaded and nothing leaves the machine.
@@ -184,12 +192,22 @@ Google Speech key needed by `webkitSpeechRecognition`). The model is
 preloaded in the background at startup so the first mic click is instant.
 
 **Review** — provider/model/credentials for review generation (an
-Autofill button copies the Text Processing keys), plus review guidance:
-- "Use example reviews to guide generation" toggle — when off, the
-  examples folder below is kept but ignored.
-- Example reviews folder — .txt/.md files whose structure and voice the
-  drafted review imitates.
-- Instructions and writing style guide textareas.
+Autofill button copies the Text Processing keys), plus:
+- **Review Style** — an example reviews folder (.txt/.md files of your
+  past reviews) and a **Generate style guide** button: the review model
+  analyzes the examples and writes an actionable style guide (voice,
+  tone, structure, length, formatting) straight into the style guide
+  textarea. The result is saved immediately, replacing the previous
+  guide, and an "Examples last processed" timestamp is kept. The style
+  guide — not the raw examples — is what drafted reviews follow, and it
+  stays local to your machine (settings.json), never in the repo.
+- **Review Instructions** — two textareas with shipped defaults: *Note
+  context* (describes the annotation JSON fields, references, and rubric
+  sent with each request) and *Additional instructions* (tone, format,
+  and process guidance, e.g. merging comments that revisit earlier
+  ones). Blank either one to fall back to the defaults. The app saves
+  the review file itself; instructions telling the model to write files
+  are ignored.
 
 **References** — optional Semantic Scholar API key for citation lookups
 (the keyless shared pool works at low volume; a key raises rate limits).
@@ -278,7 +296,9 @@ by copy.
   classification), `organize-service.js` (grouping), `qa-service.js`
   (document Q&A), `rubric-extract-service.js` (parse pasted rubric
   text), `review-check-service.js` (rubric coverage judgment),
-  `review-generate-service.js` (streamed review drafting).
+  `review-generate-service.js` (streamed review drafting),
+  `style-guide-service.js` (distill example reviews into the writing
+  style guide).
 - Citations: `citation-extract-service.js` (deterministic bibliography
   parsing), `scholar-lookup-service.js` (Semantic Scholar metadata),
   `openalex-service.js` (abstract fallback), `reference-parse.js`

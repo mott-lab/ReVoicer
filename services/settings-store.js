@@ -68,10 +68,40 @@ const DEFAULTS = {
   review_openai_compat_api_key: '',
   review_openai_compat_model: '',
 
-  review_examples_dir: '',
-  review_use_examples: true,         // read example reviews from review_examples_dir           // folder of .txt/.md example reviews (few-shot)
-  review_instructions: 'Write a review for the academic research manuscript. Use any note contents and rubric provided.',
-  review_style_guide: '',            // voice/tone/formatting guidance for the review
+  review_examples_dir: '',           // folder of .txt/.md example reviews (feeds style-guide generation)
+
+  // Describes the structure of the data the app sends with each review request
+  // (annotation JSON fields, references, rubric). Shown in Settings → Review
+  // as "Note context".
+  review_note_context: `The reviewer's annotations are provided as JSON with the following fields:
+- selected_text: the text highlighted in the PDF (may be truncated).
+- page_number: the page of the PDF the highlight is on.
+- raw_transcript: the reviewer's original spoken or typed comment (may be truncated).
+- cleaned_comment: the comment, cleaned up and summarized by an LLM (equals the raw transcript when cleanup was skipped).
+- comment_tags: tags related to the content of the comment.
+- section: the section of the paper the comment is in.
+- created_at: datetime string for when the comment was made.
+
+In writing the review, primarily use the cleaned_comment fields.
+
+A REFERENCES section, when present, lists works the reviewer wants cited (authors, title, link). Include these references verbatim in the review where relevant.
+
+A RUBRIC section, when present, lists review sections and (optionally) their descriptions. Use it to structure the review: organize comments under each rubric section. If no comment fits a section, leave it blank but still include the header.`,
+
+  // Tone, format, and process guidance for drafting the review. Shown in
+  // Settings → Review as "Additional instructions".
+  review_additional_instructions: `Write a review for the academic research manuscript. Use any note contents and rubric provided.
+
+Always use a formal tone. Do not use em-dashes. Write tight, concise, clear, and to-the-point prose. Prefer simple, direct language and avoid extended sentence formulations that try to balance or draw connections between different concepts unless necessary.
+
+Format the review in Markdown, e.g. headers denoted with hashtag sets.
+
+Sometimes the notes include a comment that refers back to a previous comment. This comes from conversational use of the tool: such a comment modifies, revisits, or extends what was said before. Do not include both comments in the review; extract the meaningful aspects of each and combine them. Do a first pass over the notes to find such relationships — check the cleaned_comment and also the raw_transcript for this — and use created_at to confirm the inferred later comment was indeed made after the inferred earlier one.
+
+After that first pass is complete, write the review, organizing the comments in a way consistent with the writing style guide.`,
+
+  review_style_guide: '',            // voice/tone/formatting guidance; generated locally, never shipped
+  review_style_guide_generated_at: '', // ISO timestamp of the last "Generate style guide" run
 
   // Highlight appearance. false (default) → every highlight uses a flat yellow
   // background; true → highlights are colored by the note's primary tag. Per-note
@@ -105,6 +135,15 @@ function migrate(raw) {
   if (out.speech_provider === 'browser') {
     out.speech_provider = 'local_whisper';
   }
+
+  // review_instructions was split into review_note_context +
+  // review_additional_instructions; the legacy value is intentionally
+  // discarded (its content lives on in the new DEFAULTS).
+  if ('review_instructions' in out) delete out.review_instructions;
+
+  // Few-shot example inclusion was removed — the examples folder now feeds
+  // style-guide generation only.
+  if ('review_use_examples' in out) delete out.review_use_examples;
 
   return out;
 }

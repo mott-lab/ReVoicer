@@ -126,6 +126,14 @@
     }
     textarea:focus { outline: none; border-color: #2d7ff9; }
 
+    /* Brief highlight when a field's content is replaced programmatically
+       (e.g. a freshly generated style guide). */
+    textarea.flash { animation: field-flash 0.8s ease; }
+    @keyframes field-flash {
+      0% { background: #1e3a5f; }
+      100% { background: #2a2a2a; }
+    }
+
     /* Read-only path field + Choose/Clear buttons (folder & file pickers). */
     .path-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
     .path-row input { flex: 1; min-width: 0; }
@@ -353,13 +361,7 @@
     </fieldset>
 
     <fieldset>
-      <legend>Review Guidance</legend>
-
-      <label class="toggle">
-        <input type="checkbox" id="review_use_examples">
-        <span class="toggle-label">Use example reviews to guide generation</span>
-      </label>
-      <div class="help">When off, the folder below is kept but ignored — reviews are drafted from the instructions and style guide alone.</div>
+      <legend>Review Style</legend>
 
       <label>Example reviews folder <span style="color:#666">(optional)</span></label>
       <div class="path-row">
@@ -367,17 +369,32 @@
         <button class="small" type="button" id="pick_examples_dir">Choose…</button>
         <button class="small secondary" type="button" id="clear_examples_dir">Clear</button>
       </div>
-      <div class="help">A folder of .txt or .md example reviews. The model imitates their structure and voice (up to 20 files / 20,000 characters are used).</div>
+      <div class="help">A folder of .txt or .md example reviews, used by Generate style guide below (up to 20 files / 20,000 characters are read).</div>
 
-      <label>Instructions</label>
-      <textarea id="review_instructions" placeholder="Write a review for the academic research manuscript. Use any note contents and rubric provided."></textarea>
-      <div class="help">Describe how the review should be structured and what to emphasize.</div>
+      <div class="test-row">
+        <button class="small" type="button" id="generate_style_guide">Generate style guide</button>
+        <span class="test-result" id="style_guide_status"></span>
+      </div>
+      <div class="help" style="color:#d9a05b;">Generating analyzes the example reviews with the Review model and replaces the style guide below. The result is saved immediately.</div>
+      <div class="help" id="style_guide_generated_at"></div>
 
       <label>Writing style guide <span style="color:#666">(optional)</span></label>
       <textarea id="review_style_guide" placeholder="e.g. Formal, constructive tone. Concise paragraphs over bullet lists. Refer to the authors in the third person. Avoid hedging language."></textarea>
-      <div class="help">Describe the voice, tone, and formatting the review should follow — treated as style guidance distinct from the structural instructions above.</div>
+      <div class="help">Describe the voice, tone, and formatting the review should follow — treated as style guidance distinct from the instructions below.</div>
+    </fieldset>
 
-      <div class="help" style="margin-top:10px; color:#aaa;">Tip: For higher-quality reviews, point to a folder of example reviews and write detailed instructions plus a style guide describing how the reviewer prefers to structure and word their reviews.</div>
+    <fieldset>
+      <legend>Review Instructions</legend>
+
+      <label>Note context</label>
+      <textarea id="review_note_context"></textarea>
+      <div class="help">Describes the structure of the annotation data sent to the model — the notes JSON fields, references, and rubric. Edit only if you change what the model should pay attention to.</div>
+
+      <label>Additional instructions</label>
+      <textarea id="review_additional_instructions"></textarea>
+      <div class="help">Tone, format, and process guidance for the review. The app saves the review file itself — any instruction telling the model to save or write files is ignored.</div>
+
+      <div class="help" style="margin-top:10px; color:#aaa;">Tip: For higher-quality reviews, generate a style guide from a folder of your past reviews and write detailed instructions describing how the review should be structured and worded.</div>
     </fieldset>
     </div><!-- /review panel -->
 
@@ -435,15 +452,56 @@
     });
     $('clear_examples_dir').addEventListener('click', () => { $('review_examples_dir').value = ''; });
 
-    // Dim/disable the examples-folder row when example usage is off; the
-    // path itself is preserved so re-enabling picks it right back up.
-    function syncExamplesRow() {
-      const on = $('review_use_examples').checked;
-      $('pick_examples_dir').disabled = !on;
-      $('clear_examples_dir').disabled = !on;
-      $('review_examples_dir').style.opacity = on ? '' : '0.5';
+    // "Style guide last generated" line under the Generate button; blank when
+    // the examples have never been processed.
+    function renderStyleGuideTimestamp(iso) {
+      const el = $('style_guide_generated_at');
+      if (!iso) { el.textContent = ''; return; }
+      const t = new Date(iso).toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+      el.textContent = `Examples last processed: ${t}`;
     }
-    $('review_use_examples').addEventListener('change', syncExamplesRow);
+
+    function styleGuideError(r) {
+      if (r.code === 'NO_EXAMPLES_DIR') return 'Choose an example reviews folder first.';
+      if (r.code === 'NO_EXAMPLES') return 'No readable .txt or .md files found in that folder.';
+      if (r.code === 'OFFLINE') return 'Offline mode is on — turn it off in Text Processing to use the LLM.';
+      return `Failed — ${r.message}`;
+    }
+
+    // Generate a style guide from the example reviews. Passes the live form so
+    // unsaved edits (a freshly picked folder, a new key) take effect; the
+    // result is persisted immediately by the main process.
+    $('generate_style_guide').addEventListener('click', async () => {
+      const btn = $('generate_style_guide');
+      const el = $('style_guide_status');
+      btn.disabled = true;
+      el.classList.remove('ok', 'err');
+      el.textContent = 'Reading examples and generating style guide…';
+      try {
+        const r = await window.desktop.generateStyleGuide(readForm());
+        if (r.ok) {
+          const ta = $('review_style_guide');
+          ta.value = r.style_guide;
+          ta.classList.remove('flash');
+          void ta.offsetWidth; // restart the animation on repeat runs
+          ta.classList.add('flash');
+          ta.addEventListener('animationend', () => ta.classList.remove('flash'), { once: true });
+          renderStyleGuideTimestamp(r.generated_at);
+          el.classList.add('ok');
+          el.textContent = `Generated from ${r.example_count} example${r.example_count === 1 ? '' : 's'} and saved.`;
+        } else {
+          el.classList.add('err');
+          el.textContent = styleGuideError(r);
+        }
+      } catch (err) {
+        el.classList.add('err');
+        el.textContent = `Failed — ${err.message || err}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     // Toggle which provider block is visible within a single tab panel. Scoped
     // by panel so the Text Processing and Review selectors don't affect each
@@ -544,8 +602,8 @@
         review_openai_compat_api_key: $('review_openai_compat_api_key').value.trim(),
         review_openai_compat_model: $('review_openai_compat_model').value.trim(),
         review_examples_dir: $('review_examples_dir').value.trim(),
-        review_use_examples: $('review_use_examples').checked,
-        review_instructions: $('review_instructions').value,
+        review_note_context: $('review_note_context').value,
+        review_additional_instructions: $('review_additional_instructions').value,
         review_style_guide: $('review_style_guide').value,
 
         auto_color_highlights: $('auto_color_highlights').checked,
@@ -585,10 +643,10 @@
       $('review_openai_compat_api_key').value = s.review_openai_compat_api_key || '';
       $('review_openai_compat_model').value = s.review_openai_compat_model || '';
       $('review_examples_dir').value = s.review_examples_dir || '';
-      $('review_use_examples').checked = s.review_use_examples !== false;
-      syncExamplesRow();
-      $('review_instructions').value = s.review_instructions || '';
+      $('review_note_context').value = s.review_note_context || '';
+      $('review_additional_instructions').value = s.review_additional_instructions || '';
       $('review_style_guide').value = s.review_style_guide || '';
+      renderStyleGuideTimestamp(s.review_style_guide_generated_at);
 
       $('auto_color_highlights').checked = s.auto_color_highlights === true;
 

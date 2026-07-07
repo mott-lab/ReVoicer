@@ -1453,6 +1453,17 @@ function notesFilenameBase() {
   return (typeof getPdfBaseName === 'function' ? getPdfBaseName() : '') || 'annotations';
 }
 
+// Default Save-As path for the generated review: the previously chosen file,
+// else <pdf directory>\<paper>_review.md, else the bare filename when the
+// PDF's folder can't be determined.
+function defaultReviewSavePath(saved) {
+  if (saved && saved.review_file_path) return saved.review_file_path;
+  const base = `${notesFilenameBase()}_review.md`;
+  const dir = (typeof getPdfDirectory === 'function' ? getPdfDirectory() : '') || '';
+  if (!dir) return base;
+  return dir + (dir.includes('\\') ? '\\' : '/') + base;
+}
+
 async function exportMarkdown() {
   if (!currentPdfId) return;
 
@@ -1795,7 +1806,7 @@ async function loadReview() {
   loading.style.display = 'flex';
   try {
     const saved = await api.getGeneratedReview(currentPdfId);
-    if (!saved || saved.empty || !saved.review_text) {
+    if (!saved || saved.empty || (!saved.review_text && !saved.thinking_text)) {
       container.innerHTML = '<p class="empty-state">No review yet. Click Generate Review to draft one.</p>';
     } else {
       renderReviewEditor(saved);
@@ -1864,16 +1875,9 @@ async function runGenerateReview() {
   try {
     const result = await window.desktop.generateReview(currentPdfId);
     stopReviewStream();
-    // Ask where to save; default to the previously chosen path or <paper>_review.md.
-    const def = result.review_file_path || `${notesFilenameBase()}_review.md`;
-    const path = await window.desktop.chooseSavePath(def);
-    if (path) {
-      const saved = await api.saveGeneratedReview(currentPdfId, result.review_text, path);
-      renderReviewEditor(saved);
-    } else {
-      // Cancelled the save dialog — show the draft unsaved; Save will prompt.
-      renderReviewEditor(result);
-    }
+    // The draft is already persisted in the store; writing an .md file happens
+    // only when the user clicks Save.
+    renderReviewEditor(result);
   } catch (err) {
     stopReviewStream();
     const msg = String(err?.message || err);
@@ -1891,12 +1895,14 @@ async function runGenerateReview() {
   }
 }
 
-// Editable draft view: textarea + meta (timestamp / saved path) + Save / Copy.
-// Save writes the textarea content to the paper's review file (prompting for a
-// location the first time), overwriting it.
+// Editable draft view: textarea + meta (timestamp / saved path) + Save / Copy,
+// plus a collapsed read-only box with the model's reasoning/commentary from
+// generation. Save always opens a Save-As dialog (defaulting to the current
+// file or the PDF's folder) and writes the textarea content there.
 function renderReviewEditor(saved) {
   const container = document.getElementById('review-container');
   const reviewText = saved.review_text || '';
+  const thinkingText = saved.thinking_text || '';
   const filePath = saved.review_file_path || '';
 
   const metaBits = [];
@@ -1913,25 +1919,33 @@ function renderReviewEditor(saved) {
     ? `<div class="review-empty">Generated without any annotations — add notes for a more grounded review.</div>`
     : '';
 
+  const commentaryBlock = thinkingText
+    ? `<details class="review-thinking-wrap">
+        <summary>Model commentary</summary>
+        <div class="review-thinking review-commentary"></div>
+      </details>`
+    : '';
+
   container.innerHTML = `
     ${metaLine}
     ${missingLine}
     ${unsavedLine}
     ${emptyNotesLine}
+    ${commentaryBlock}
     <textarea class="generated-review-edit" spellcheck="false">${escapeHtml(reviewText)}</textarea>
     <div class="review-editor-actions">
       <button class="toolbar-btn review-copy-btn">Copy</button>
-      <button class="toolbar-btn review-primary review-save-btn" disabled>Save</button>
+      <button class="toolbar-btn review-primary review-save-btn">Save</button>
     </div>
   `;
 
+  // Injected via textContent, not markup — the commentary is untrusted model
+  // output and can be large.
+  const commentaryEl = container.querySelector('.review-commentary');
+  if (commentaryEl) commentaryEl.textContent = thinkingText;
+
   const textarea = container.querySelector('.generated-review-edit');
   const saveBtn = container.querySelector('.review-save-btn');
-  // Edits enable Save; the latest text is always read live from the textarea.
-  textarea.addEventListener('input', () => {
-    saveBtn.disabled = textarea.value === reviewText;
-    saveBtn.textContent = 'Save';
-  });
 
   const copyBtn = container.querySelector('.review-copy-btn');
   copyBtn.addEventListener('click', async () => {
@@ -1945,16 +1959,12 @@ function renderReviewEditor(saved) {
   });
 
   saveBtn.addEventListener('click', async () => {
-    let path = filePath;
-    if (!path) {
-      path = await window.desktop.chooseSavePath(`${notesFilenameBase()}_review.md`);
-      if (!path) return; // cancelled
-    }
+    const path = await window.desktop.chooseSavePath(defaultReviewSavePath(saved));
+    if (!path) return; // cancelled — no state change
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving…';
     try {
       const updated = await api.saveGeneratedReview(currentPdfId, textarea.value, path);
-      // Re-render from the saved record so the baseline tracks the new text.
       renderReviewEditor(updated);
     } catch (err) {
       saveBtn.disabled = false;

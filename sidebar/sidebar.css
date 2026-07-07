@@ -1024,6 +1024,12 @@ button.note-section-pill:hover {
   overflow-y: auto;
 }
 
+/* Persisted model commentary in the editor view — give it more room than the
+   live thinking feed. */
+.review-commentary {
+  max-height: 240px;
+}
+
 .review-stream-output {
   white-space: pre-wrap;
   word-wrap: break-word;

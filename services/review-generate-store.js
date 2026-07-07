@@ -61,10 +61,13 @@ class ReviewGenerateStore {
     }
   }
 
-  async save(contentHash, { review_text, note_count, generated_at, review_file_path }) {
+  async save(contentHash, { review_text, thinking_text, note_count, generated_at, review_file_path }) {
     const record = {
       content_hash: contentHash,
       review_text: review_text || '',
+      // Model reasoning/commentary captured during generation; kept for
+      // reference in the UI, never written to the .md review file.
+      thinking_text: thinking_text || '',
       note_count: note_count || 0,
       // Preserve the original generation time on manual edits; default to now.
       generated_at: generated_at || new Date().toISOString(),

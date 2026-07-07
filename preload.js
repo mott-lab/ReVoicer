@@ -137,6 +137,7 @@ window.desktop = {
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
   selectFile: () => ipcRenderer.invoke('desktop:selectFile'),
   generateReview: (pdfIdentifier) => ipcRenderer.invoke('desktop:generateReview', pdfIdentifier),
+  generateStyleGuide: (overrides) => ipcRenderer.invoke('desktop:generateStyleGuide', overrides),
   chooseSavePath: (defaultPath) => ipcRenderer.invoke('desktop:chooseSavePath', defaultPath),
 };
 
