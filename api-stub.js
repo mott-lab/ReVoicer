@@ -25,6 +25,7 @@ const { getRubricTemplatesStore } = require('./services/rubric-templates-store')
 const { extractCitations } = require('./services/citation-extract-service');
 const { lookupCitation } = require('./services/scholar-lookup-service');
 const { getCitationsStore } = require('./services/citations-store');
+const { llmConfigStatus } = require('./services/llm-service');
 
 // Heuristic fallback used when the user has globally disabled LLM cleanup.
 // Mirrors the categories defined in cleanup-service VALID_TAGS. Returns a
@@ -71,10 +72,16 @@ const routes = {
 
   'POST /api/notes/': async ({ body }) => {
     const { cleanup_enabled, offline_mode } = getSettingsStore().get();
-    if (offline_mode) {
-      // Offline: no LLM, no heuristics — save raw and mark pending so the
-      // sidebar's "Clean pending" queue can process it once back online.
-      return getNoteStore().createNote({
+    // Cleanup and classify-only both call the LLM, so a note that needs either
+    // can't be processed when offline or when the provider has no credentials.
+    // Rather than failing, save it raw and mark it pending — the sidebar's
+    // "Clean pending" queue processes it once the user is back online / has
+    // added an API key in Settings. `pending_reason` tells the renderer which
+    // message to show. Notes with cleanup disabled never touch the LLM and
+    // save normally below.
+    const llmStatus = cleanup_enabled ? llmConfigStatus() : null;
+    if (offline_mode || (llmStatus && !llmStatus.ok)) {
+      const note = await getNoteStore().createNote({
         contentHash: body.pdf_identifier,
         pdfTitle: body.pdf_title || null,
         pdfUrl: null,
@@ -90,6 +97,7 @@ const routes = {
         // verbatim when the queue drains — classify (tags/section) only.
         cleanupMode: body.skip_cleanup ? 'classify' : 'full',
       });
+      return { ...note, pending_reason: offline_mode ? 'offline' : llmStatus.reason };
     }
     const skipRewrite = body.skip_cleanup || !cleanup_enabled;
     const pageContext = cleanup_enabled

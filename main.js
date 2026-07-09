@@ -268,6 +268,15 @@ ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
   const { testConnection } = require('./services/llm-service');
   return testConnection(provider, params || {});
 });
+// Deterministic (no-network) LLM readiness check for renderer preflights.
+// `cleanupEnabled` rides along so note flows know whether saving invokes the
+// LLM at all.
+ipcMain.handle('desktop:llmStatus', (_e, opts) => {
+  const { llmConfigStatus } = require('./services/llm-service');
+  const status = llmConfigStatus(opts || {});
+  status.cleanupEnabled = getSettingsStore().get().cleanup_enabled !== false;
+  return status;
+});
 
 // Folder/file pickers used by the Settings window (e.g. the Review tab's
 // example-reviews folder and instructions file). Parent the dialog to whichever

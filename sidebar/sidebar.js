@@ -13,6 +13,19 @@ let rubricTemplates = []; // cached saved rubric templates (dropdown + dup-name 
 let noteEditorOpen = false;
 let pendingNotesViewMode; // undefined = no reload pending
 
+// Render an error state into a tab container using the shared classifier
+// (lib/error-messages.js). Configuration errors get an "Open Settings" button;
+// everything else shows the action + error detail (no HTTP backend exists, so
+// failures are config or internal errors).
+function renderErrorState(container, err, actionLabel) {
+  const d = describeApiError(err, actionLabel);
+  container.innerHTML = `<p class="error-state">${escapeHtml(d.text)}${
+    d.openSettings ? ' <button class="toolbar-btn open-settings-btn" type="button">Open Settings</button>' : ''
+  }</p>`;
+  const btn = container.querySelector('.open-settings-btn');
+  if (btn) btn.addEventListener('click', () => window.desktop.openSettings());
+}
+
 async function init() {
   await api.init();
 
@@ -238,7 +251,9 @@ async function loadNotes(viewMode = null) {
       renderGroupedNotes(data.groups, container);
     }
   } catch (err) {
-    container.innerHTML = `<p class="error-state">Failed to load notes. Is the backend running?</p>`;
+    // The by-section/by-theme views are LLM-backed, so this genuinely can be
+    // a not-configured error; renderErrorState shows the Settings prompt then.
+    renderErrorState(container, err, 'Loading notes');
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
@@ -264,12 +279,14 @@ async function cleanAllPending() {
   if (!currentPdfId) return;
   const btn = document.getElementById('clean-pending-btn');
   try {
-    const s = await window.desktop?.getSettings?.();
-    if (s?.offline_mode) {
-      alert('Offline mode is on — turn it off in Settings to clean notes.');
+    // Deterministic preflight: offline mode off and provider credentials
+    // present — otherwise every note in the queue would fail the same way.
+    const st = await window.desktop?.llmStatus?.();
+    if (st && !st.ok) {
+      alert(st.message);
       return;
     }
-  } catch { /* settings unavailable; let the server-side guard decide */ }
+  } catch { /* status unavailable; let the server-side guard decide */ }
 
   btn.disabled = true;
   try {
@@ -292,12 +309,13 @@ async function cleanAllPending() {
           pdfIdentifier: currentPdfId,
         }).catch(() => {});
       } catch (err) {
-        failures.push({ note, message: err.message || String(err) });
+        failures.push({ note, err });
         if (/offline/i.test(err.message || '')) break; // mode re-enabled mid-run
       }
     }
     if (failures.length) {
-      alert(`${failures.length} note(s) failed to clean and remain pending:\n${failures[0].message}`);
+      const d = describeApiError(failures[0].err, 'Cleaning');
+      alert(`${failures.length} note(s) failed to clean and remain pending:\n${d.text}`);
     }
   } finally {
     btn.disabled = false;
@@ -332,7 +350,7 @@ async function loadQuestions(sortMode = null) {
 
     renderQuestionsList(entries, container);
   } catch (err) {
-    container.innerHTML = `<p class="error-state">Failed to load questions. Is the backend running?</p>`;
+    renderErrorState(container, err, 'Loading questions');
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
@@ -354,7 +372,7 @@ async function loadReferences() {
     const data = await api.listReferences(currentPdfId);
     renderReferencesList(data.references || [], container);
   } catch (err) {
-    container.innerHTML = `<p class="error-state">Failed to load references. Is the backend running?</p>`;
+    renderErrorState(container, err, 'Loading references');
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
@@ -504,7 +522,7 @@ async function loadRubric() {
     const data = await api.listRubric(currentPdfId);
     renderRubricList(data.items || [], container);
   } catch (err) {
-    container.innerHTML = `<p class="error-state">Failed to load rubric. Is the backend running?</p>`;
+    renderErrorState(container, err, 'Loading the rubric');
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
@@ -845,10 +863,7 @@ async function runPasteRubricParse(rubricText) {
     await loadRubric();
     closePasteRubricModal();
   } catch (err) {
-    const msg = String(err?.message || err);
-    const friendly = /not configured/i.test(msg)
-      ? 'No LLM is configured. Open Settings and add an API key for OpenAI, Anthropic, Ollama, or an OpenAI-compatible endpoint.'
-      : `Extraction failed: ${msg}`;
+    const friendly = describeApiError(err, 'Extraction').text;
     body.innerHTML = `
       <div class="review-error">${escapeHtml(friendly)}</div>
       <p class="review-modal-hint">Paste the rubric text below.</p>
@@ -1016,9 +1031,9 @@ function attachNoteActionHandlers(container) {
       } catch (err) {
         btn.textContent = 'Re-clean';
         btn.disabled = false;
-        // Surface the server message — e.g. the 503 "Offline mode is on"
-        // guard from the reclean route.
-        alert(err.message || 'Failed to clean note.');
+        // Surface a classified message — e.g. offline mode or a missing API
+        // key both point the user at Settings.
+        alert(describeApiError(err, 'Cleaning the note').text);
       }
     });
   });
@@ -1477,7 +1492,7 @@ async function exportMarkdown() {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert('Failed to export. Is the backend running?');
+    alert(describeApiError(err, 'Export').text);
     console.error('Export error:', err);
   }
 }
@@ -1524,7 +1539,7 @@ async function exportJson() {
     a.click();
     URL.revokeObjectURL(url);
   } catch (err) {
-    alert('Failed to export. Is the backend running?');
+    alert(describeApiError(err, 'Export').text);
     console.error('Export error:', err);
   }
 }
@@ -1579,8 +1594,8 @@ async function openReviewCheckModal() {
   reviewEscHandler = (e) => { if (e.key === 'Escape') closeReviewModal(); };
   document.addEventListener('keydown', reviewEscHandler);
 
-  // Fetch persisted state. On error (e.g. backend down) fall back to the
-  // empty input view so the user can still attempt to run a check.
+  // Fetch persisted state. On error (e.g. a store read failure) fall back to
+  // the empty input view so the user can still attempt to run a check.
   let saved = null;
   try {
     const resp = await api.getReviewCheck(currentPdfId);
@@ -1765,17 +1780,10 @@ async function runReviewCheck(rubricText) {
     }
     renderReviewLoaded(result);
   } catch (err) {
-    const msg = String(err?.message || err);
-    if (/not configured/i.test(msg)) {
-      renderReviewError(
-        'No LLM is configured. Open Settings and add an API key for OpenAI, Anthropic, Ollama, or an OpenAI-compatible endpoint.',
-        rubricText,
-        false,
-      );
-      // Settings link wired up below if/when we add one in the template.
-    } else {
-      renderReviewError(`Check failed: ${msg}`, rubricText, true);
-    }
+    const d = describeApiError(err, 'Check');
+    // Config problems (missing key, offline mode, rejected key) aren't worth a
+    // retry button — the fix lives in Settings.
+    renderReviewError(d.text, rubricText, d.kind === 'internal');
   }
 }
 
@@ -1812,7 +1820,7 @@ async function loadReview() {
       renderReviewEditor(saved);
     }
   } catch (err) {
-    container.innerHTML = '<p class="error-state">Failed to load review. Is the backend running?</p>';
+    renderErrorState(container, err, 'Loading the review');
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
@@ -1882,12 +1890,14 @@ async function runGenerateReview() {
     stopReviewStream();
     const msg = String(err?.message || err);
     const container = document.getElementById('review-container');
-    if (/not configured/i.test(msg)) {
+    const d = describeApiError(err, 'Generation');
+    if (d.kind === 'not_configured') {
+      // Review generation has its own provider tab, so point at it explicitly.
       container.innerHTML = '<p class="error-state">No LLM is configured for review generation. Open Settings → Review (or Text Processing) and add an API key for the chosen provider.</p>';
     } else if (/document text/i.test(msg)) {
       container.innerHTML = '<p class="error-state">Document text is not available yet. Make sure the PDF has fully loaded, then try again.</p>';
     } else {
-      container.innerHTML = `<p class="error-state">Generation failed: ${escapeHtml(msg)}</p>`;
+      container.innerHTML = `<p class="error-state">${escapeHtml(d.text)}</p>`;
     }
   } finally {
     reviewGenerating = false;

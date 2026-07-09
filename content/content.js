@@ -1,5 +1,6 @@
 // PDF Converser - Content Script
-// Handles text selection detection, floating action button, speech recording, and backend submission
+// Handles text selection detection, floating action button, speech recording,
+// and note submission through the in-process API (lib/api-client.js).
 
 const apiClient = new ApiClient();
 const speechCapture = new SpeechCapture();
@@ -24,7 +25,7 @@ let citationNumbers = new Set();
 let citationPages = new Map(); // reference number -> page it appears on
 // Session cache keyed by "pdfId:number" -> resolved lookup result or the
 // in-flight promise. Dedupes concurrent clicks and avoids re-requesting within
-// a session; the backend also persists results across restarts.
+// a session; the citations store also persists results across restarts.
 const citationLookups = new Map();
 let citationModalEl = null;
 let citationEscHandler = null;
@@ -435,6 +436,15 @@ async function submitQuestion(selectedText, question) {
     return;
   }
 
+  // Q&A can't run at all without the LLM — check deterministically (offline
+  // mode off, provider credentials present) before making any request.
+  const llm = await window.desktop.llmStatus();
+  if (!llm.ok) {
+    const d = describeApiError({ code: llm.reason === 'offline' ? 'OFFLINE' : 'NOT_CONFIGURED' }, 'Getting an answer');
+    showAnswerOverlay(question, d.text, false, true, d.openSettings);
+    return;
+  }
+
   const pageNum = getCurrentPageNumber(currentSelectionRange);
   showAnswerOverlay(question, null, true);
 
@@ -449,11 +459,14 @@ async function submitQuestion(selectedText, question) {
     }).catch(() => {});
   } catch (err) {
     console.error('PDF Converser - Q&A error:', err);
-    showAnswerOverlay(question, 'Failed to get answer. Is the backend running?', false, true);
+    const d = describeApiError(err, 'Getting an answer');
+    showAnswerOverlay(question, d.text, false, true, d.openSettings);
   }
 }
 
-function showAnswerOverlay(question, answerText, isLoading, isError = false) {
+// `offerSettings` adds an "Open Settings" button next to Close — used when the
+// error is a configuration problem the user can fix there.
+function showAnswerOverlay(question, answerText, isLoading, isError = false, offerSettings = false) {
   hideAnswerOverlay();
 
   answerOverlay = document.createElement('div');
@@ -474,12 +487,15 @@ function showAnswerOverlay(question, answerText, isLoading, isError = false) {
     <div class="pcr-selected-text">"${escapeHtml(truncatedQuestion)}"</div>
     ${contentHtml}
     <div class="pcr-actions">
+      ${offerSettings ? '<button class="pcr-cancel-btn" id="pcr-answer-settings">Open Settings</button>' : ''}
       <button class="pcr-cancel-btn" id="pcr-answer-close">Close</button>
     </div>
   `;
   document.body.appendChild(answerOverlay);
 
   document.getElementById('pcr-answer-close').onclick = () => hideAnswerOverlay();
+  const settingsBtn = document.getElementById('pcr-answer-settings');
+  if (settingsBtn) settingsBtn.onclick = () => window.desktop.openSettings();
 }
 
 function hideAnswerOverlay() {
@@ -515,6 +531,29 @@ function captureHighlightData() {
 }
 
 // === Note Submission ===
+
+// Success toast for a saved note. Pending notes carry a placeholder type, so
+// no type label is shown; the wording depends on why cleanup was deferred
+// (offline mode vs. no LLM configured — api-stub sets `pending_reason`).
+function showNoteSavedToast(note) {
+  const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
+  const preview = note.cleaned_comment.length > 70
+    ? note.cleaned_comment.substring(0, 70) + '...'
+    : note.cleaned_comment;
+  if (note.cleanup_status === 'pending') {
+    if (note.pending_reason === 'not_configured') {
+      showToast(
+        'Saved — pending cleanup. No LLM is configured; add an API key in Settings, then use Clean pending in the sidebar.',
+        'warning',
+        { label: 'Open Settings', onAction: () => window.desktop.openSettings() }
+      );
+    } else {
+      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
+    }
+  } else {
+    showToast(`[${typeLabel}] ${preview}`, 'success');
+  }
+}
 
 async function submitNote(selectedText, rawTranscript, audioBlob) {
   const pdfId = getPdfIdentifier();
@@ -557,16 +596,7 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
       highlight_data: highlightData,
     });
 
-    const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
-    const preview = note.cleaned_comment.length > 70
-      ? note.cleaned_comment.substring(0, 70) + '...'
-      : note.cleaned_comment;
-    // Pending notes carry a placeholder type, so don't show it as a real label.
-    if (note.cleanup_status === 'pending') {
-      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
-    } else {
-      showToast(`[${typeLabel}] ${preview}`, 'success');
-    }
+    showNoteSavedToast(note);
 
     // Add to cache and render highlight immediately
     cachedNotes.push(note);
@@ -579,7 +609,7 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
     }).catch(() => {});
   } catch (err) {
     console.error('PDF Converser - submission error:', err);
-    showToast('Failed to save annotation. Is the backend running?', 'error');
+    showApiErrorToast(err, 'Saving the annotation');
   }
 }
 
@@ -602,15 +632,7 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
       highlight_data: highlightData,
     });
 
-    const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
-    const preview = note.cleaned_comment.length > 70
-      ? note.cleaned_comment.substring(0, 70) + '...'
-      : note.cleaned_comment;
-    if (note.cleanup_status === 'pending') {
-      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
-    } else {
-      showToast(`[${typeLabel}] ${preview}`, 'success');
-    }
+    showNoteSavedToast(note);
 
     cachedNotes.push(note);
     if (note.highlight_data) renderNoteHighlight(note);
@@ -621,7 +643,7 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
     }).catch(() => {});
   } catch (err) {
     console.error('PDF Converser - submission error:', err);
-    showToast('Failed to save annotation. Is the backend running?', 'error');
+    showApiErrorToast(err, 'Saving the annotation');
   }
 }
 
@@ -1022,8 +1044,8 @@ function renderCitationNav() {
 
 // Look up a reference's metadata at most once per session: return a cached
 // result, join an in-flight request for the same reference, or start a new one.
-// Successful / not-found results are cached client-side (the backend also
-// persists them); errors are not cached so the user can retry.
+// Successful / not-found results are cached client-side (the citations store
+// also persists them); errors are not cached so the user can retry.
 function lookupCitationOnce(number) {
   const pdfId = getPdfIdentifier();
   const cacheKey = `${pdfId}:${number}`;
@@ -1147,7 +1169,10 @@ function jumpToReference(number, page) {
 
 // === Toast Notifications ===
 
-function showToast(message, type = 'info') {
+// `action` ({ label, onAction }) renders a button inside the toast — used to
+// offer "Open Settings" on configuration errors. Actionable toasts stay up
+// longer so the button can actually be clicked.
+function showToast(message, type = 'info', action = null) {
   const existing = document.getElementById('pdf-converser-toast');
   if (existing) existing.remove();
 
@@ -1155,13 +1180,32 @@ function showToast(message, type = 'info') {
   toast.id = 'pdf-converser-toast';
   toast.className = `pcr-toast pcr-toast-${type}`;
   toast.textContent = message;
+  if (action && action.label && action.onAction) {
+    const btn = document.createElement('button');
+    btn.className = 'pcr-toast-action';
+    btn.textContent = action.label;
+    btn.onclick = () => {
+      action.onAction();
+      toast.remove();
+    };
+    toast.appendChild(btn);
+  }
   document.body.appendChild(toast);
 
-  // Auto-dismiss after 4 seconds
+  const dismissMs = action ? 8000 : 4000;
   setTimeout(() => {
     toast.classList.add('pcr-toast-fade');
     setTimeout(() => toast.remove(), 300);
-  }, 4000);
+  }, dismissMs);
+}
+
+// Classifies an API-layer error (via lib/error-messages.js) and shows it as a
+// toast, with an Open Settings action when the fix lives in Settings.
+function showApiErrorToast(err, actionLabel) {
+  const d = describeApiError(err, actionLabel);
+  showToast(d.text, 'error', d.openSettings
+    ? { label: 'Open Settings', onAction: () => window.desktop.openSettings() }
+    : null);
 }
 
 // === Message Handler (for service worker / sidebar communication) ===

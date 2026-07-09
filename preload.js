@@ -133,6 +133,7 @@ window.desktop = {
   getSettings: () => ipcRenderer.invoke('desktop:getSettings'),
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
+  llmStatus: (opts) => ipcRenderer.invoke('desktop:llmStatus', opts),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
   selectFile: () => ipcRenderer.invoke('desktop:selectFile'),

@@ -24,6 +24,9 @@ and get cleaned later.
 - **Internet connection for the first install** — `npm install` downloads
   the npm packages (including Electron) and the ~40 MB Vosk speech model.
   After that the app can run fully offline.
+- **An LLM provider for the AI features** (optional at install time) —
+  an OpenAI or Anthropic API key, or a local model via Ollama or any
+  OpenAI-compatible endpoint. See [LLM Setup](#llm-setup-api-key).
 
 Everything else (Electron, the OpenAI/Anthropic SDKs, Vosk) is installed
 locally by `npm install`; no global packages or system dependencies are
@@ -43,6 +46,33 @@ download fails, install continues and you can retry with
 
 Then `File → Open PDF…` (`Ctrl+O`) or drag a PDF onto the window.
 `File → Open Recent` lists recently opened files.
+
+### LLM Setup (API Key)
+
+Every LLM-backed feature — annotation cleanup and tagging, Q&A, the
+By Section / By Theme views, rubric extraction, Check Review, and review
+generation — needs a configured model provider. Open
+`File → Settings…` (`Ctrl/Cmd+,`) → **Text Processing** and pick one:
+
+- **OpenAI** — paste an API key from
+  [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- **Anthropic** — paste an API key from
+  [console.anthropic.com](https://console.anthropic.com/settings/keys)
+- **Ollama** — no key needed; install [Ollama](https://ollama.com/) and
+  pull a model (e.g. `ollama pull llama3.2`) to run fully locally
+- **OpenAI-compatible** — a base URL and model name for Groq, OpenRouter,
+  Together, LM Studio, vLLM, llama.cpp server, etc. (key optional,
+  depending on the endpoint)
+
+Use the **Test** button next to the provider to confirm the credentials
+work; it also lists the available models. Keys are stored locally in
+`settings.json` under your OS user-data directory (see Note Storage
+below) and are only ever sent to the provider you configured.
+
+Without a provider configured, the app still works as a PDF
+reader/annotator: notes are saved with their raw text and marked
+**Pending cleanup**, and a prompt points to Settings. Once a provider is
+added, **Clean pending (N)** in the Notes toolbar processes the backlog.
 
 ## How It Works
 

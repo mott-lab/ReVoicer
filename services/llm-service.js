@@ -32,9 +32,50 @@ function _anthropicClientFor(apiKey) {
   return _anthropicClient;
 }
 
-function _missing(field) {
-  const err = new Error(`${field} not configured. Open Settings.`);
-  err.code = 'NOT_CONFIGURED';
+// Deterministic, no-network check of whether the LLM can be called at all:
+// offline mode off and the selected provider's required credentials present.
+// This is the single source of truth — chat() enforces it, the renderer reads
+// it via the `desktop:llmStatus` IPC, and api-stub uses it to decide whether a
+// new note must be saved as pending. `provider`/`creds`/`model` are the same
+// optional overrides chat() accepts (the Review tab passes its own).
+// Returns { ok, provider, reason: 'offline' | 'not_configured' | null, message }.
+function llmConfigStatus({ provider, creds, model } = {}) {
+  const s = getSettingsStore().get();
+  if (s.offline_mode) {
+    return {
+      ok: false,
+      provider: null,
+      reason: 'offline',
+      message: 'Offline mode is on — LLM features are disabled. Turn it off in Settings.',
+    };
+  }
+  provider = provider || s.text_provider || 'openai';
+  const cred = (field) => (creds && creds[field] != null && creds[field] !== '' ? creds[field] : s[field]);
+  const missing = (label) => ({
+    ok: false,
+    provider,
+    reason: 'not_configured',
+    message: `${label} not configured. Open Settings.`,
+  });
+  if (provider === 'openai') {
+    if (!cred('openai_api_key')) return missing('OpenAI API key');
+  } else if (provider === 'anthropic') {
+    if (!cred('anthropic_api_key')) return missing('Anthropic API key');
+  } else if (provider === 'openai_compat') {
+    // The API key is optional for OpenAI-compatible endpoints (chat() falls
+    // back to a placeholder); base URL and model are what's actually required.
+    if (!cred('openai_compat_base_url')) return missing('OpenAI-compatible base URL');
+    if (!model && !s.openai_compat_model) return missing('OpenAI-compatible model');
+  } else if (provider !== 'ollama') {
+    // Ollama needs nothing (base URL defaults to localhost).
+    return missing(`Text provider "${provider}"`);
+  }
+  return { ok: true, provider, reason: null, message: null };
+}
+
+function _configError({ reason, message }) {
+  const err = new Error(message);
+  err.code = reason === 'offline' ? 'OFFLINE' : 'NOT_CONFIGURED';
   err.status = 503;
   return err;
 }
@@ -59,16 +100,13 @@ function anthropicSupportsThinking(model) {
 // provider/model emits reasoning (Anthropic extended thinking, Ollama reasoning
 // models). Without `onEvent`, the original non-streaming path runs unchanged.
 async function chat({ system, user, temperature = 0.3, provider, model, maxTokens = 1024, creds, onEvent }) {
+  // Offline mode blocks every LLM feature (cleanup, Q&A, organize, review,
+  // rubric parse) uniformly — including local Ollama — so offline behavior is
+  // predictable. Missing credentials fail here too, before any network call.
+  const status = llmConfigStatus({ provider, creds, model });
+  if (!status.ok) throw _configError(status);
   const s = getSettingsStore().get();
-  if (s.offline_mode) {
-    // Blocks every LLM feature (cleanup, Q&A, organize, review, rubric parse)
-    // uniformly — including local Ollama — so offline behavior is predictable.
-    const err = new Error('Offline mode is on — LLM features are disabled. Turn it off in Settings.');
-    err.code = 'OFFLINE';
-    err.status = 503;
-    throw err;
-  }
-  provider = provider || s.text_provider || 'openai';
+  provider = status.provider;
   const cred = (field) => (creds && creds[field] != null && creds[field] !== '' ? creds[field] : s[field]);
   const messages = [
     { role: 'system', content: system },
@@ -79,14 +117,11 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
     let apiKey, baseURL, useModel;
     if (provider === 'openai') {
       apiKey = cred('openai_api_key');
-      if (!apiKey) throw _missing('OpenAI API key');
       baseURL = cred('openai_base_url') || undefined;
       useModel = model || s.openai_model || 'gpt-4o-mini';
     } else {
       baseURL = cred('openai_compat_base_url');
-      if (!baseURL) throw _missing('OpenAI-compatible base URL');
       useModel = model || s.openai_compat_model;
-      if (!useModel) throw _missing('OpenAI-compatible model');
       // Some local endpoints accept any non-empty key (or none). Default to a
       // placeholder so the SDK doesn't error before the request is sent.
       apiKey = cred('openai_compat_api_key') || 'sk-noop';
@@ -112,7 +147,6 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
 
   if (provider === 'anthropic') {
     const apiKey = cred('anthropic_api_key');
-    if (!apiKey) throw _missing('Anthropic API key');
     const client = _anthropicClientFor(apiKey);
     const amodel = model || s.anthropic_model || 'claude-haiku-4-5-20251001';
     // Only enable extended thinking when streaming to the UI (review) and the
@@ -311,4 +345,4 @@ async function testConnection(provider, params) {
   }
 }
 
-module.exports = { chat, parseJsonResponse, testConnection };
+module.exports = { chat, parseJsonResponse, testConnection, llmConfigStatus };

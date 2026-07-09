@@ -252,8 +252,31 @@
   color: #ffcdd2;
 }
 
+.pcr-toast-warning {
+  background: #e65100;
+  color: #fff3e0;
+}
+
 .pcr-toast-fade {
   opacity: 0;
+}
+
+/* Action button inside a toast (e.g. "Open Settings" on config errors). */
+.pcr-toast-action {
+  display: block;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pcr-toast-action:hover {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 /* === Inline Highlights === */
