@@ -13,6 +13,22 @@ Runs fully offline once configured with a local model provider, and has a
 dedicated offline mode for working with no LLM at all — notes queue up
 and get cleaned later.
 
+## Requirements
+
+- **Node.js** (LTS release, v20 or later recommended) with **npm** —
+  npm ships with Node.js. Download from
+  [nodejs.org](https://nodejs.org/en/download) or install via a version
+  manager such as [nvm](https://github.com/nvm-sh/nvm) (macOS/Linux) or
+  [nvm-windows](https://github.com/coreybutler/nvm-windows). Verify with
+  `node --version` and `npm --version`.
+- **Internet connection for the first install** — `npm install` downloads
+  the npm packages (including Electron) and the ~40 MB Vosk speech model.
+  After that the app can run fully offline.
+
+Everything else (Electron, the OpenAI/Anthropic SDKs, Vosk) is installed
+locally by `npm install`; no global packages or system dependencies are
+needed.
+
 ## Run
 
 ```

@@ -31,7 +31,6 @@ async function extractRubricItems({ rubricText }) {
   const content = await chat({
     system: EXTRACT_SYSTEM,
     user: text,
-    temperature: 0.2,
   });
 
   const parsed = parseJsonResponse(content);

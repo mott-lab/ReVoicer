@@ -70,7 +70,6 @@ async function generateStyleGuide(overrides = {}) {
   const styleGuide = await chat({
     system: STYLE_GUIDE_SYSTEM,
     user: parts.join('\n'),
-    temperature: 0.3,
     maxTokens: 2048,
     ...reviewLlmOptions(s),
   });

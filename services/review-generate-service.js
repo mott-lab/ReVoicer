@@ -185,7 +185,6 @@ async function generateReview({ pdfIdentifier, onChunk }) {
   const reviewText = await chat({
     system: REVIEW_SYSTEM,
     user: parts.join('\n'),
-    temperature: 0.4,
     provider,
     model,
     creds,

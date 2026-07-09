@@ -61,7 +61,7 @@ async function checkReview({ pdfIdentifier, rubricText }) {
     '=== END ANNOTATIONS ===',
   ].join('\n');
 
-  const content = await chat({ system: REVIEW_SYSTEM, user: userMsg, temperature: 0.2 });
+  const content = await chat({ system: REVIEW_SYSTEM, user: userMsg });
 
   const parsed = parseJsonResponse(content);
   if (!parsed || !Array.isArray(parsed.components)) {

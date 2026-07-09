@@ -140,7 +140,7 @@ async function llmParseReference(reference) {
       + 'Return ONLY strict minified JSON with keys: '
       + 'title (string), authors (array of strings), year (number or null), doi (string or null). '
       + 'No commentary.';
-    const content = await chat({ system, user: reference, temperature: 0 });
+    const content = await chat({ system, user: reference });
     const parsed = parseJsonResponse(content);
     if (!parsed || typeof parsed !== 'object') return { title: null, doi: null };
     const title = typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : null;

@@ -33,7 +33,6 @@ async function askQuestion({ pdfIdentifier, question, selectedText, pageNumber }
   const answer = await chat({
     system: qaSystemPrompt(documentText),
     user: userMsg,
-    temperature: 0.3,
   });
 
   const entry = await getQAStore().createEntry({
