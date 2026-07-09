@@ -10,6 +10,15 @@ const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
 
+// Shipped default for review_style_guide (Settings → Review). Kept as a
+// standalone markdown file — it's ~12 KB and full of backticks/fenced code
+// blocks that would need escaping in a template literal. "Generate style
+// guide" overwrites the setting; blanking the textarea falls back to this.
+let DEFAULT_STYLE_GUIDE = '';
+try {
+  DEFAULT_STYLE_GUIDE = fsSync.readFileSync(path.join(__dirname, 'default-style-guide.md'), 'utf-8');
+} catch { /* file missing — default stays empty */ }
+
 const DEFAULTS = {
   // Text provider for cleanup / organize / Q&A.
   text_provider: 'openai',           // 'openai' | 'anthropic' | 'ollama' | 'openai_compat'
@@ -100,7 +109,10 @@ Sometimes the notes include a comment that refers back to a previous comment. Th
 
 After that first pass is complete, write the review, organizing the comments in a way consistent with the writing style guide.`,
 
-  review_style_guide: '',            // voice/tone/formatting guidance; generated locally, never shipped
+  // Voice/tone/formatting guidance followed by drafted reviews. Ships with a
+  // default template (services/default-style-guide.md); "Generate style guide"
+  // replaces it with one distilled from the user's example reviews.
+  review_style_guide: DEFAULT_STYLE_GUIDE,
   review_style_guide_generated_at: '', // ISO timestamp of the last "Generate style guide" run
 
   // Highlight appearance. false (default) → every highlight uses a flat yellow

@@ -239,14 +239,17 @@ preloaded in the background at startup so the first mic click is instant.
 
 **Review** — provider/model/credentials for review generation (an
 Autofill button copies the Text Processing keys), plus:
-- **Review Style** — an example reviews folder (.txt/.md files of your
-  past reviews) and a **Generate style guide** button: the review model
-  analyzes the examples and writes an actionable style guide (voice,
-  tone, structure, length, formatting) straight into the style guide
-  textarea. The result is saved immediately, replacing the previous
-  guide, and an "Examples last processed" timestamp is kept. The style
-  guide — not the raw examples — is what drafted reviews follow, and it
-  stays local to your machine (settings.json), never in the repo.
+- **Review Style** — a style guide textarea that drafted reviews follow.
+  It ships with a default guide (`services/default-style-guide.md`:
+  voice, tone, structure, phrasing, and formatting conventions for
+  academic reviews); blanking the textarea falls back to that default.
+  To personalize it, point the example reviews folder at .txt/.md files
+  of your past reviews and click **Generate style guide**: the review
+  model analyzes the examples and writes a guide distilled from them
+  straight into the textarea, replacing the previous guide (an "Examples
+  last processed" timestamp is kept). The style guide — not the raw
+  examples — is what drafted reviews follow; generated guides stay local
+  to your machine (settings.json).
 - **Review Instructions** — two textareas with shipped defaults: *Note
   context* (describes the annotation JSON fields, references, and rubric
   sent with each request) and *Additional instructions* (tone, format,

@@ -134,7 +134,7 @@ async function generateReview({ pdfIdentifier, onChunk }) {
   const instructions =
     (s.review_additional_instructions || '').trim() || DEFAULTS.review_additional_instructions;
   const noteContext = (s.review_note_context || '').trim() || DEFAULTS.review_note_context;
-  const styleGuide = (s.review_style_guide || '').trim();
+  const styleGuide = (s.review_style_guide || '').trim() || DEFAULTS.review_style_guide;
 
   const parts = [
     '=== REVIEWER INSTRUCTIONS ===',
