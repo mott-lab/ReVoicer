@@ -298,8 +298,7 @@ function showRecordingUI(selectedText) {
     speechCapture.stop();
   };
   document.getElementById('pcr-cancel-btn').onclick = () => {
-    speechCapture.transcript = ''; // Clear transcript so onEnd doesn't submit
-    speechCapture.stop();
+    speechCapture.cancel(); // tears down without firing onEnd — nothing is submitted
     hideRecordingUI();
   };
 }

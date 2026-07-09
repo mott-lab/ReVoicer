@@ -394,7 +394,7 @@ function renderReferenceCard(ref) {
     <div class="ref-card" data-id="${escapeAttr(ref.id)}">
       <div class="ref-row">
         <label class="ref-label">Authors</label>
-        <input class="ref-input" data-field="authors" type="text" value="${escapeAttr(ref.authors || '')}" placeholder="e.g. Gottsacker et al.">
+        <input class="ref-input" data-field="authors" type="text" value="${escapeAttr(ref.authors || '')}" placeholder="e.g. Author et al.">
       </div>
       <div class="ref-row">
         <label class="ref-label">Title</label>

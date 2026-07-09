@@ -1,5 +1,5 @@
 // File-based JSON storage for user-supplied references that the cleanup LLM
-// uses as context (so a transcript mention like "Gottsacker et al." can be
+// uses as context (so a transcript mention like "Smith et al." can be
 // resolved to the proper title/authors/link). Schema:
 // `<notesDir>/{content_hash}.refs.json`.
 //

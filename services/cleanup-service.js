@@ -46,7 +46,7 @@ ${pageContext}
 }
 
 // Format the user-curated reference library for the cleanup prompt. The LLM
-// uses this to resolve loose mentions ("the Gottsacker paper", "see Smith
+// uses this to resolve loose mentions ("the Smith paper", "see Smith
 // et al.") into the proper author/title/link the user wants in the cleaned
 // note.
 function referencesBlock(references) {
@@ -63,7 +63,7 @@ function referencesBlock(references) {
   if (lines.length === 0) return '';
   return `
 
-The user has provided this reference library. If their transcript mentions any of these works (e.g. by an author surname like "Gottsacker et al." or a partial title), substitute the loose mention with a proper reference using the matching authors, title, and link below. Do not invent citations; only use entries from this list.
+The user has provided this reference library. If their transcript mentions any of these works (e.g. by an author surname like "Smith et al." or a partial title), substitute the loose mention with a proper reference using the matching authors, title, and link below. Do not invent citations; only use entries from this list.
 ---
 ${lines.join('\n')}
 ---`;
