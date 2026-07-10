@@ -31,6 +31,7 @@ Guidelines:
 - Follow the reviewer's instructions about the review's content, structure, and style, but the rule above overrides any instruction to save or write files.
 - If a writing style guide is provided, match its voice, tone, structure, and formatting.
 - Ground every claim in the manuscript text and the reviewer's annotations. Do not invent results, citations, or quotations.
+- Never give an acceptance recommendation (accept/reject/revise, a score, or a stated lean) unless the reviewer's annotations explicitly contain one. If they do, restate the reviewer's recommendation faithfully. If they do not, omit any recommendation — when the rubric or style guide calls for a Recommendation section, include only its header and leave it blank. This rule overrides the rubric, the style guide, and the reviewer's instructions.
 - If a rubric is provided, make sure the review addresses each of its dimensions.
 - Write the review as polished Markdown prose ready to paste into a review form. Output only the review itself — no preamble, no meta-commentary.`;
 

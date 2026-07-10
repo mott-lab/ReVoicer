@@ -103,6 +103,15 @@ The full text of each PDF is extracted and stored on first open, so Q&A
 covers the whole document, not just the highlighted passage. Past
 questions and answers live in the sidebar's **Questions** tab.
 
+Ask is a lookup and comprehension aid, not a co-reviewer: answers report
+only what the paper says, grounded in verbatim quotations with section
+and page references. It will not critique or speculate — questions like
+"is this justification sound?" or "are they missing related work?" get a
+short note about the feature's purpose plus pointers to the passages
+where the authors address the topic, so you can judge for yourself. If
+the paper doesn't cover something, it says so rather than filling the
+gap.
+
 ### Viewing Annotations
 
 The sidebar's **Notes** tab shows all annotations for the current PDF in

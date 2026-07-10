@@ -80,11 +80,40 @@ function _configError({ reason, message }) {
   return err;
 }
 
-// Extended thinking is available on Claude 3.7 and Claude 4.x (opus/sonnet).
-// Haiku models do not support it. Used to decide whether to request a thinking
-// stream when surfacing reasoning to the UI.
-function anthropicSupportsThinking(model) {
-  return /claude-(3-7|opus-4|sonnet-4)/i.test(String(model || ''));
+// OpenAI reasoning models (GPT-5 family, o1/o3/o4) dropped `max_tokens` in
+// favor of `max_completion_tokens` (which also budgets hidden reasoning
+// tokens) and only accept the default temperature.
+function isOpenAiReasoningModel(model) {
+  return /^(gpt-5|o[134])(\b|[-.])/i.test(String(model || ''));
+}
+
+// Anthropic sampling parameters (temperature/top_p/top_k) were removed on
+// Opus 4.7+, Sonnet 5, and the Fable/Mythos 5 family — sending any value
+// returns a 400. Older models still accept them.
+function anthropicSamplingRemoved(model) {
+  return /claude-(opus-4-[78]|sonnet-5|fable-5|mythos)/i.test(String(model || ''));
+}
+
+// Thinking config by model generation, used when streaming reasoning to the
+// UI (review generation). Three eras:
+// - Claude 4.6+ / 5 family: adaptive thinking; `budget_tokens` is deprecated
+//   (4.6) or rejected with a 400 (4.7+, Sonnet 5, Fable 5). On 4.7+ the
+//   thinking text defaults to display 'omitted' (empty deltas), so opt back
+//   into 'summarized' for the UI feed.
+// - Claude 3.7 / earlier 4.x: manual extended thinking with a token budget.
+// - Everything else (Haiku, unknown): no thinking config.
+function anthropicThinkingConfig(model) {
+  const m = String(model || '');
+  if (/claude-(opus-4-[78]|sonnet-5|fable-5|mythos)/i.test(m)) {
+    return { type: 'adaptive', display: 'summarized' };
+  }
+  if (/claude-(opus-4-6|sonnet-4-6)/i.test(m)) {
+    return { type: 'adaptive' }; // display defaults to 'summarized' on 4.6
+  }
+  if (/claude-(3-7|opus-4|sonnet-4)/i.test(m)) {
+    return { type: 'enabled', budget_tokens: 2048 };
+  }
+  return null;
 }
 
 // `provider`, `model`, `maxTokens`, and `creds` are optional overrides. When
@@ -127,10 +156,32 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
       apiKey = cred('openai_compat_api_key') || 'sk-noop';
     }
     const client = _openaiClient(apiKey, baseURL);
-    const params = { model: useModel, temperature, max_tokens: maxTokens, messages };
+    // Reasoning tokens count against the completion budget, so give the cap
+    // headroom (mirrors the Anthropic extended-thinking bump below).
+    const reasoningParams = { model: useModel, max_completion_tokens: Math.max(maxTokens, 8192), messages };
+    const params = isOpenAiReasoningModel(useModel)
+      ? reasoningParams
+      : { model: useModel, temperature, max_tokens: maxTokens, messages };
+
+    // Safety net for reasoning models the name check misses (future families,
+    // openai_compat proxies): a 400 complaining about max_tokens/temperature
+    // gets one retry with the reasoning-style params. The error surfaces from
+    // create() before any stream chunk is read, so retrying is safe there too.
+    const createWithCompat = async (extra) => {
+      try {
+        return await client.chat.completions.create({ ...params, ...extra });
+      } catch (err) {
+        const msg = String(err?.message || '');
+        const paramRejected =
+          /max_tokens/i.test(msg) && /max_completion_tokens/i.test(msg) ||
+          /temperature/i.test(msg) && /unsupported|not supported|does not support/i.test(msg);
+        if (params === reasoningParams || !paramRejected) throw err;
+        return client.chat.completions.create({ ...reasoningParams, ...extra });
+      }
+    };
 
     if (onEvent) {
-      const stream = await client.chat.completions.create({ ...params, stream: true });
+      const stream = await createWithCompat({ stream: true });
       let text = '';
       for await (const chunk of stream) {
         const d = chunk.choices?.[0]?.delta || {};
@@ -141,7 +192,7 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
       }
       return text.trim();
     }
-    const resp = await client.chat.completions.create(params);
+    const resp = await createWithCompat();
     return resp.choices?.[0]?.message?.content?.trim() || '';
   }
 
@@ -149,21 +200,43 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
     const apiKey = cred('anthropic_api_key');
     const client = _anthropicClientFor(apiKey);
     const amodel = model || s.anthropic_model || 'claude-haiku-4-5-20251001';
-    // Only enable extended thinking when streaming to the UI (review) and the
-    // model supports it — keeps cleanup/organize/Q&A behavior and cost unchanged.
-    const useThinking = !!onEvent && anthropicSupportsThinking(amodel);
+    // Only request thinking when streaming to the UI (review) — keeps
+    // cleanup/organize/Q&A behavior and cost unchanged.
+    const thinking = onEvent ? anthropicThinkingConfig(amodel) : null;
     const params = {
       model: amodel,
-      // Thinking requires max_tokens > budget_tokens, and temperature must be 1.
-      max_tokens: useThinking ? Math.max(maxTokens, 8192) : maxTokens,
-      temperature: useThinking ? 1 : temperature,
+      // Thinking output counts against max_tokens (and manual thinking
+      // requires max_tokens > budget_tokens), so give the cap headroom.
+      max_tokens: thinking ? Math.max(maxTokens, 8192) : maxTokens,
       system,
       messages: [{ role: 'user', content: user }],
     };
-    if (useThinking) params.thinking = { type: 'enabled', budget_tokens: 2048 };
+    if (thinking) params.thinking = thinking;
+    if (!anthropicSamplingRemoved(amodel)) {
+      // Manual extended thinking requires the default temperature; adaptive
+      // thinking is safest with it omitted. Only plain requests keep the
+      // configured value.
+      if (!thinking) params.temperature = temperature;
+      else if (thinking.type === 'enabled') params.temperature = 1;
+    }
 
-    if (onEvent) {
-      const stream = client.messages.stream(params);
+    // Safety net mirroring the OpenAI one: if a model outside the name checks
+    // rejects a sampling/thinking parameter with a 400, retry once with the
+    // bare params (no temperature, no thinking config).
+    const strippedParams = {
+      model: amodel,
+      max_tokens: params.max_tokens,
+      system,
+      messages: params.messages,
+    };
+    const hasTunables = 'temperature' in params || 'thinking' in params;
+    const paramRejected = (err) =>
+      hasTunables &&
+      err?.status === 400 &&
+      /temperature|top_p|top_k|budget_tokens|thinking/i.test(String(err?.message || ''));
+
+    const runStream = async (p) => {
+      const stream = client.messages.stream(p);
       let text = '';
       for await (const event of stream) {
         if (event.type !== 'content_block_delta') continue;
@@ -177,13 +250,25 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
       }
       await stream.finalMessage();
       return text.trim();
+    };
+    const runCreate = async (p) => {
+      const resp = await client.messages.create(p);
+      return (resp.content || [])
+        .filter((b) => b.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+    };
+
+    const run = onEvent ? runStream : runCreate;
+    try {
+      return await run(params);
+    } catch (err) {
+      // A param-rejection 400 fires before any content is streamed, so the
+      // retry cannot duplicate output already sent to onEvent.
+      if (!paramRejected(err)) throw err;
+      return run(strippedParams);
     }
-    const resp = await client.messages.create(params);
-    return (resp.content || [])
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
   }
 
   if (provider === 'ollama') {
