@@ -90,6 +90,15 @@ body {
   background: #f0f0f0;
 }
 
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toolbar-btn:disabled:hover {
+  background: white;
+}
+
 /* Loading */
 .loading {
   display: flex;
@@ -859,11 +868,6 @@ button.note-section-pill:hover {
   border-top: 1px solid #eee;
 }
 
-.review-modal-footer .toolbar-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .review-modal-footer .review-primary {
   background: #4285f4;
   color: white;
@@ -929,9 +933,18 @@ button.note-section-pill:hover {
   color: #333;
 }
 
-.review-rubric-details .review-rubric-input {
-  min-height: 120px;
+/* Read-only display of the rubric text a check ran against. */
+.review-rubric-text {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #555;
+  background: #f7f7f7;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 8px 10px;
   margin-top: 6px;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 .review-checked-at {
@@ -984,11 +997,6 @@ button.note-section-pill:hover {
 .review-editor-actions .review-primary:hover:not(:disabled) {
   background: #3367d6;
   border-color: #3367d6;
-}
-
-.review-editor-actions .toolbar-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Live streaming view while a review generates. */
@@ -1071,6 +1079,26 @@ button.note-section-pill:hover {
   outline: none;
   border-color: #4285f4;
   background: #fff;
+}
+
+/* Review tab fill-height mode (class set on #sidebar-pane by switchTab):
+   the container is a flex column; the textarea (or stream output) takes
+   the remaining height while meta lines and the actions row keep their
+   intrinsic height. */
+.review-tab-active #review-container > * {
+  flex: 0 0 auto;
+}
+
+.review-tab-active #review-container > .generated-review-edit {
+  flex: 1 1 auto;
+  min-height: 140px; /* floor for short windows; the pane scrolls past this */
+  resize: none; /* height is managed by flex */
+}
+
+.review-tab-active #review-container > .review-stream-output {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: none;
 }
 
 .review-component {

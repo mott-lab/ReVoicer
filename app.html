@@ -84,6 +84,23 @@
       flex: 0 0 auto;
       display: block;
     }
+    /* Review tab only: swap the intrinsic-height layout for a flex-fill
+       chain so the draft textarea grows to the pane height with the
+       Copy/Save actions kept visible below it. #sidebar-pane keeps
+       overflow-y: auto so very short windows degrade to scrolling. */
+    #sidebar-pane.review-tab-active #app { flex: 1 1 auto; }
+    #sidebar-pane.review-tab-active .sidebar-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #sidebar-pane.review-tab-active #review-container {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
     /* Defensive: pin tab content containers to the top with no top margin
        so the empty-state text always reads as "anchored below the toolbar"
        rather than floating in the middle of the panel. */
@@ -212,7 +229,6 @@
           </select>
           <button id="export-btn" class="toolbar-btn" title="Export as Markdown" style="display: none;">Export MD</button>
           <button id="export-json-btn" class="toolbar-btn" title="Export as JSON">Export JSON</button>
-          <button id="check-review-btn" class="toolbar-btn" title="Check coverage against conference rubric">Check Review</button>
           <button id="clean-pending-btn" class="toolbar-btn" title="Run LLM cleanup on all notes saved offline" style="display: none;">Clean pending</button>
         </div>
 
@@ -234,6 +250,7 @@
             <option value="">Load saved rubric…</option>
           </select>
           <button id="save-rubric-btn" class="toolbar-btn" title="Save the current rubric under a name for reuse">Save as…</button>
+          <button id="check-review-btn" class="toolbar-btn" disabled title="Check your notes' coverage against the rubric sections below">Check Review</button>
         </div>
 
         <div id="review-toolbar" class="toolbar" style="display: none;">

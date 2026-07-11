@@ -89,6 +89,7 @@ async function init() {
           '<p class="empty-state">Open a PDF to manage rubric sections.</p>';
         document.getElementById('review-container').innerHTML =
           '<p class="empty-state">Open a PDF to generate a review.</p>';
+        updateCheckReviewButtonState();
       }
     }
   });
@@ -112,10 +113,12 @@ async function init() {
   document.getElementById('export-btn').addEventListener('click', exportMarkdown);
   document.getElementById('export-json-btn').addEventListener('click', exportJson);
 
-  // Check Review button — opens a modal that compares notes against a
-  // pasted conference rubric. The last rubric + result is persisted per
-  // PDF, so reopening shows the previous state and a Re-check button.
+  // Check Review button (in the Rubric toolbar) — opens a modal that compares
+  // notes against the rubric sections in the Rubric tab. The last result is
+  // persisted per PDF, so reopening shows the previous state and a Re-check
+  // button. Disabled until the rubric has at least one non-empty section.
   document.getElementById('check-review-btn').addEventListener('click', openReviewCheckModal);
+  document.getElementById('rubric-container').addEventListener('input', updateCheckReviewButtonState);
 
   // Clean pending button — LLM-cleans notes that were saved in offline mode,
   // one at a time. Hidden unless the current PDF has pending notes.
@@ -171,8 +174,12 @@ function switchTab(tab) {
   // notes list followed by a short (empty) refs tab leaves the viewport
   // scrolled down, making the empty-state text look like it's floating in
   // the middle of the sidebar.
-  const scrollArea = document.querySelector('#sidebar-pane .sidebar-content');
+  const scrollArea = document.getElementById('sidebar-pane');
   if (scrollArea) scrollArea.scrollTop = 0;
+
+  // The Review tab swaps the sidebar's intrinsic-height layout for a
+  // flex-fill one so the draft textarea takes most of the window height.
+  if (scrollArea) scrollArea.classList.toggle('review-tab-active', tab === 'review');
 
   const notesToolbar = document.getElementById('notes-toolbar');
   const questionsToolbar = document.getElementById('questions-toolbar');
@@ -526,6 +533,7 @@ async function loadRubric() {
     console.error('PDF Converser sidebar error:', err);
   } finally {
     loading.style.display = 'none';
+    updateCheckReviewButtonState();
   }
 }
 
@@ -637,6 +645,20 @@ function currentRubricItemsFromDom() {
     if (section || description) items.push({ section, description });
   });
   return items;
+}
+
+// Flatten the rubric tab's items into the free-form text the check LLM expects.
+function rubricTextFromItems(items) {
+  return items.map((it, i) => {
+    const head = it.section || `Section ${i + 1}`;
+    return it.description ? `${i + 1}. ${head} — ${it.description}` : `${i + 1}. ${head}`;
+  }).join('\n');
+}
+
+// Enabled iff the rubric tab currently shows at least one non-empty section.
+function updateCheckReviewButtonState() {
+  const btn = document.getElementById('check-review-btn');
+  if (btn) btn.disabled = currentRubricItemsFromDom().length === 0;
 }
 
 async function populateRubricTemplates() {
@@ -1547,8 +1569,8 @@ async function exportJson() {
 // ─── Review Check modal ───────────────────────────────────────────────────
 //
 // Single live modal at a time. The DOM tree is built once per open; phase
-// changes (input → loading → loaded → error) just swap the body + footer
-// contents so we don't lose textarea state on transient renders.
+// changes (loading → loaded → error) just swap the body + footer contents.
+// The rubric comes from the Rubric tab's sections, not a paste step.
 
 let reviewModalEl = null;
 let reviewEscHandler = null;
@@ -1570,6 +1592,9 @@ async function openReviewCheckModal() {
     return;
   }
   if (reviewModalEl) return; // already open
+  // The button is disabled until the rubric has a non-empty section, so this
+  // is just a defensive guard.
+  if (currentRubricItemsFromDom().length === 0) return;
 
   reviewModalEl = document.createElement('div');
   reviewModalEl.className = 'review-modal-backdrop';
@@ -1607,32 +1632,8 @@ async function openReviewCheckModal() {
   if (saved && Array.isArray(saved.components) && saved.rubric_text) {
     renderReviewLoaded(saved);
   } else {
-    renderReviewInput('');
+    runReviewCheck(rubricTextFromItems(currentRubricItemsFromDom()));
   }
-}
-
-function renderReviewInput(prefill) {
-  if (!reviewModalEl) return;
-  const body = reviewModalEl.querySelector('.review-modal-body');
-  const footer = reviewModalEl.querySelector('.review-modal-footer');
-  body.innerHTML = `
-    <p class="review-modal-hint">Paste the conference's reviewing standards or rubric below. The LLM will extract the main components and check how well your annotations cover each one.</p>
-    <textarea class="review-rubric-input" placeholder="e.g. 1. Novelty — is the contribution new?&#10;2. Soundness — is the methodology rigorous?&#10;3. Clarity, significance, ..."></textarea>
-  `;
-  footer.innerHTML = `
-    <button class="toolbar-btn review-cancel">Cancel</button>
-    <button class="toolbar-btn review-primary" disabled>Analyze</button>
-  `;
-  const textarea = body.querySelector('.review-rubric-input');
-  textarea.value = prefill || '';
-  textarea.focus();
-  const analyzeBtn = footer.querySelector('.review-primary');
-  analyzeBtn.disabled = textarea.value.trim().length === 0;
-  textarea.addEventListener('input', () => {
-    analyzeBtn.disabled = textarea.value.trim().length === 0;
-  });
-  footer.querySelector('.review-cancel').addEventListener('click', closeReviewModal);
-  analyzeBtn.addEventListener('click', () => runReviewCheck(textarea.value.trim()));
 }
 
 function renderReviewLoading() {
@@ -1666,8 +1667,8 @@ function renderReviewLoaded(saved) {
 
   body.innerHTML = `
     <details class="review-rubric-details">
-      <summary>Rubric</summary>
-      <textarea class="review-rubric-input">${escapeHtml(rubricText)}</textarea>
+      <summary>Rubric used</summary>
+      <div class="review-rubric-text">${escapeHtml(rubricText)}</div>
     </details>
     ${checkedAtLine}
     ${parseErrorLine}
@@ -1681,9 +1682,10 @@ function renderReviewLoaded(saved) {
     <button class="toolbar-btn review-primary">Re-check</button>
   `;
   footer.querySelector('.review-cancel').addEventListener('click', closeReviewModal);
+  // Re-check reads the Rubric tab at click time so edits made since the last
+  // check are picked up.
   footer.querySelector('.review-primary').addEventListener('click', () => {
-    const ta = body.querySelector('.review-rubric-input');
-    runReviewCheck((ta?.value || rubricText).trim());
+    runReviewCheck(rubricTextFromItems(currentRubricItemsFromDom()));
   });
 }
 
@@ -1694,8 +1696,8 @@ function renderReviewError(message, rubricText, showRetry = true) {
   body.innerHTML = `
     <div class="review-error">${escapeHtml(message)}</div>
     <details class="review-rubric-details" open>
-      <summary>Rubric</summary>
-      <textarea class="review-rubric-input">${escapeHtml(rubricText || '')}</textarea>
+      <summary>Rubric used</summary>
+      <div class="review-rubric-text">${escapeHtml(rubricText || '')}</div>
     </details>
   `;
   footer.innerHTML = `
@@ -1706,8 +1708,7 @@ function renderReviewError(message, rubricText, showRetry = true) {
   const retry = footer.querySelector('.review-primary');
   if (retry) {
     retry.addEventListener('click', () => {
-      const ta = body.querySelector('.review-rubric-input');
-      runReviewCheck((ta?.value || rubricText || '').trim());
+      runReviewCheck((rubricText || '').trim());
     });
   }
 }
@@ -1762,7 +1763,7 @@ function renderReviewComponents(components, container) {
 async function runReviewCheck(rubricText) {
   if (!currentPdfId) return;
   if (!rubricText) {
-    renderReviewError('Rubric text is empty. Paste a rubric and try again.', '', false);
+    renderReviewError('No rubric sections found. Close this dialog and add sections in the Rubric tab.', '', false);
     return;
   }
   renderReviewLoading();
