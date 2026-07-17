@@ -101,6 +101,10 @@
       display: flex;
       flex-direction: column;
     }
+    /* The reflections block and Generate Review row sit above the review
+       draft at intrinsic height; only #review-container flex-fills. */
+    #sidebar-pane.review-tab-active #reflections-container,
+    #sidebar-pane.review-tab-active #review-generate-row { flex: 0 0 auto; }
     /* Defensive: pin tab content containers to the top with no top margin
        so the empty-state text always reads as "anchored below the toolbar"
        rather than floating in the middle of the panel. */
@@ -138,6 +142,8 @@
     /* When speech_provider is 'off', hide the voice-annotation button on
        the floating action bar. The text-annotation button remains. */
     .speech-off #pcr-fab-mic { display: none !important; }
+    /* Same setting hides the reflection mic (inline row and nudge modal). */
+    .speech-off .reflection-mic-btn { display: none !important; }
 
     /* Header row: the tab bar plus the always-visible offline toggle in the
        right corner, a small space after the Review tab. The offline-mode
@@ -253,9 +259,6 @@
           <button id="check-review-btn" class="toolbar-btn" disabled title="Check your notes' coverage against the rubric sections below">Check Review</button>
         </div>
 
-        <div id="review-toolbar" class="toolbar" style="display: none;">
-          <button id="generate-review-btn" class="toolbar-btn" title="Draft a review from your notes and rubric">Generate Review</button>
-        </div>
       </div>
 
       <div class="sidebar-content">
@@ -270,6 +273,10 @@
         <div id="questions-container" style="display: none;"></div>
         <div id="references-container" style="display: none;"></div>
         <div id="rubric-container" style="display: none;"></div>
+        <div id="reflections-container" style="display: none;"></div>
+        <div id="review-generate-row" class="toolbar" style="display: none;">
+          <button id="generate-review-btn" class="toolbar-btn" title="Draft a review from your notes and rubric">Generate Review</button>
+        </div>
         <div id="review-container" style="display: none;"></div>
       </div>
     </div>

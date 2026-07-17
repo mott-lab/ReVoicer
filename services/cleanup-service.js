@@ -130,6 +130,31 @@ Output ONLY valid JSON with exactly two fields:
 No other text. Just the JSON.`;
 }
 
+// Cleaning prompt for reflection notes — the reviewer's overall impressions
+// of the whole paper, captured in the Review tab. Unlike annotations there is
+// no highlighted passage, no tags, and no section, so the output is plain
+// text rather than JSON.
+const REFLECTION_SYSTEM = `You are a research annotation assistant. Your job is to clean up a reviewer's voice-recorded reflection on an academic paper they are reviewing — their overarching impressions and final thoughts on the paper as a whole, not a comment on any specific passage.
+
+The raw speech transcript may contain:
+- Filler words (um, uh, like, you know)
+- False starts and self-corrections
+- Rambling or repetitive phrasing
+- Incomplete sentences
+- Doubling back: returning to an earlier point later in the recording to add detail, clarify, or correct it
+
+Rewrite the reflection as clear, concise, well-structured prose that PRESERVES ALL of the speaker's distinct intellectual content, impressions, and judgments. Do not add your own analysis. Do not drop any substantive point they made. Just clean up the delivery. When the speaker doubles back to a point, merge every statement about it into one coherent point, treating a later correction as their final intent.
+
+Output ONLY the cleaned reflection text. No JSON, no preamble, no commentary.`;
+
+async function cleanupReflection(rawTranscript) {
+  const content = await chat({
+    system: REFLECTION_SYSTEM,
+    user: rawTranscript || '',
+  });
+  return { text: (content || '').trim() || rawTranscript || '' };
+}
+
 function normalizeTags(rawTags) {
   if (!Array.isArray(rawTags)) return ['summary'];
   const filtered = rawTags
@@ -184,6 +209,7 @@ async function classifyCommentType(selectedText, comment, pageContext, reference
 
 module.exports = {
   cleanupTranscript,
+  cleanupReflection,
   classifyCommentType,
   VALID_TAGS,
   VALID_TYPES,

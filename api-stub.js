@@ -9,7 +9,7 @@ const { getNoteStore } = require('./services/note-store');
 const { getDocumentStore } = require('./services/document-store');
 const { getQAStore } = require('./services/qa-store');
 const { exportToMarkdown } = require('./services/export-service');
-const { cleanupTranscript, classifyCommentType } = require('./services/cleanup-service');
+const { cleanupTranscript, cleanupReflection, classifyCommentType } = require('./services/cleanup-service');
 const { organizeNotes } = require('./services/organize-service');
 const { askQuestion } = require('./services/qa-service');
 const { transcribeAudio } = require('./services/transcribe-service');
@@ -18,6 +18,7 @@ const { checkReview, getSavedReviewCheck } = require('./services/review-check-se
 const { getReviewCheckStore } = require('./services/review-check-store');
 const { generateReview, getSavedReview, saveReview } = require('./services/review-generate-service');
 const { getReviewGenerateStore } = require('./services/review-generate-store');
+const { getReflectionStore } = require('./services/reflection-store');
 const { getReferencesStore } = require('./services/references-store');
 const { getRubricStore } = require('./services/rubric-store');
 const { extractRubricItems } = require('./services/rubric-extract-service');
@@ -275,6 +276,71 @@ const routes = {
     });
   },
 
+  // ─── Reflections ───────────────────────────────────────────────────────
+
+  'GET /api/reflections/': async ({ query }) => {
+    const reflections = await getReflectionStore().listReflections(query.pdf_identifier);
+    return { reflections, total: reflections.length };
+  },
+
+  'POST /api/reflections/': async ({ body }) => {
+    if (!body?.pdf_identifier) {
+      return { __status: 400, error: 'pdf_identifier is required' };
+    }
+    const raw = (body.raw_transcript || '').trim();
+    if (!raw) {
+      return { __status: 400, error: 'raw_transcript is required' };
+    }
+    const { cleanup_enabled, offline_mode } = getSettingsStore().get();
+    // Typed reflections (skip_cleanup) and cleanup-disabled installs never
+    // touch the LLM. Voice reflections that can't be cleaned right now are
+    // saved raw and marked pending — unlike notes there is no re-clean queue;
+    // review generation sends the raw transcript too, so nothing is lost.
+    if (body.skip_cleanup || !cleanup_enabled) {
+      return getReflectionStore().createReflection({
+        contentHash: body.pdf_identifier,
+        rawTranscript: raw,
+        cleanedText: raw,
+        cleanupStatus: 'done',
+      });
+    }
+    const llmStatus = llmConfigStatus();
+    if (offline_mode || !llmStatus.ok) {
+      const reflection = await getReflectionStore().createReflection({
+        contentHash: body.pdf_identifier,
+        rawTranscript: raw,
+        cleanedText: raw,
+        cleanupStatus: 'pending',
+      });
+      return { ...reflection, pending_reason: offline_mode ? 'offline' : llmStatus.reason };
+    }
+    const { text } = await cleanupReflection(raw);
+    return getReflectionStore().createReflection({
+      contentHash: body.pdf_identifier,
+      rawTranscript: raw,
+      cleanedText: text,
+      cleanupStatus: 'done',
+    });
+  },
+
+  'PUT /api/reflections/:id': async ({ params, query, body }) => {
+    const text = typeof body?.cleaned_text === 'string' ? body.cleaned_text.trim() : '';
+    if (!text) {
+      return { __status: 400, error: 'cleaned_text is required' };
+    }
+    const updated = await getReflectionStore().updateReflection(
+      query.pdf_identifier, params.id, { cleaned_text: text },
+    );
+    if (!updated) return { __status: 404, error: 'Reflection not found' };
+    return updated;
+  },
+
+  'DELETE /api/reflections/:id': async ({ params, query }) => {
+    const ok = await getReflectionStore().deleteReflection(query.pdf_identifier, params.id);
+    if (!ok) return { __status: 404, error: 'Reflection not found' };
+    return { ok: true };
+  },
+
   // ─── Transcribe ────────────────────────────────────────────────────────
 
   'POST /api/transcribe': async ({ body }) => {
@@ -486,6 +552,7 @@ function initialize({ notesDir }) {
   getQAStore(notesDir);
   getReviewCheckStore(notesDir);
   getReviewGenerateStore(notesDir);
+  getReflectionStore(notesDir);
   getReferencesStore(notesDir);
   getRubricStore(notesDir);
   getRubricTemplatesStore(notesDir);

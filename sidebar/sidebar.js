@@ -78,7 +78,10 @@ async function init() {
         else if (currentTab === 'questions') loadQuestions();
         else if (currentTab === 'references') loadReferences();
         else if (currentTab === 'rubric') loadRubric();
-        else if (currentTab === 'review' && !reviewGenerating) loadReview();
+        else if (currentTab === 'review') {
+          loadReflections();
+          if (!reviewGenerating) loadReview();
+        }
       } else if (!newId) {
         currentPdfId = null;
         rubricCheck = null;
@@ -93,6 +96,7 @@ async function init() {
           '<p class="empty-state">Open a PDF to manage references.</p>';
         document.getElementById('rubric-container').innerHTML =
           '<p class="empty-state">Open a PDF to manage rubric sections.</p>';
+        document.getElementById('reflections-container').innerHTML = '';
         document.getElementById('review-container').innerHTML =
           '<p class="empty-state">Open a PDF to generate a review.</p>';
         updateCheckReviewButtonState();
@@ -198,18 +202,20 @@ function switchTab(tab) {
   const questionsContainer = document.getElementById('questions-container');
   const referencesContainer = document.getElementById('references-container');
   const rubricContainer = document.getElementById('rubric-container');
-  const reviewToolbar = document.getElementById('review-toolbar');
+  const reviewGenerateRow = document.getElementById('review-generate-row');
+  const reflectionsContainer = document.getElementById('reflections-container');
   const reviewContainer = document.getElementById('review-container');
 
   notesToolbar.style.display = 'none';
   questionsToolbar.style.display = 'none';
   referencesToolbar.style.display = 'none';
   rubricToolbar.style.display = 'none';
-  reviewToolbar.style.display = 'none';
+  reviewGenerateRow.style.display = 'none';
   notesContainer.style.display = 'none';
   questionsContainer.style.display = 'none';
   referencesContainer.style.display = 'none';
   rubricContainer.style.display = 'none';
+  reflectionsContainer.style.display = 'none';
   reviewContainer.style.display = 'none';
 
   if (tab === 'notes') {
@@ -229,8 +235,10 @@ function switchTab(tab) {
     rubricContainer.style.display = '';
     loadRubric();
   } else if (tab === 'review') {
-    reviewToolbar.style.display = 'flex';
+    reviewGenerateRow.style.display = 'flex';
+    reflectionsContainer.style.display = '';
     reviewContainer.style.display = '';
+    loadReflections();
     // Don't reload over a live generation — it would clobber the stream.
     if (!reviewGenerating) loadReview();
   }
@@ -1701,6 +1709,316 @@ async function runRubricCoverageCheck() {
   }
 }
 
+// ─── Reflections (Review tab) ─────────────────────────────────────────────
+//
+// The reviewer's overall impressions of the paper, captured (typed or spoken)
+// in the Review tab before generating a review. Stored per PDF via
+// /api/reflections/ and fed to review generation as a distinct prompt section
+// that frames the draft. Voice input reuses SpeechCapture (lib/speech.js) and
+// content.js's shouldSkipServerTranscribe — all three scripts share this
+// document's global scope.
+
+const REFLECTION_MIC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+  <line x1="12" y1="19" x2="12" y2="23"/>
+  <line x1="8" y1="23" x2="16" y2="23"/>
+</svg>`;
+
+// Sidebar-local capture instance — content.js's global `speechCapture` has
+// onEnd/onError handlers belonging to the viewer's annotation flow.
+let reflectionCapture = null;
+
+// Wire a mic button: click starts recording (pulsing button + a temporary
+// Cancel next to it), clicking again stops. The final transcript — Whisper's
+// when available, else the live one — is passed to onFinal(text).
+function wireReflectionMic(micBtn, onFinal) {
+  let cancelBtn = null;
+  const setRecording = (on) => {
+    micBtn.classList.toggle('recording', on);
+    micBtn.title = on ? 'Stop recording' : 'Record a reflection';
+    if (on) {
+      cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'toolbar-btn reflection-cancel-btn';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', () => {
+        reflectionCapture.cancel();
+        setRecording(false);
+      });
+      micBtn.after(cancelBtn);
+    } else if (cancelBtn) {
+      cancelBtn.remove();
+      cancelBtn = null;
+    }
+  };
+
+  micBtn.addEventListener('click', () => {
+    if (!reflectionCapture) reflectionCapture = new SpeechCapture();
+    if (micBtn.classList.contains('recording')) {
+      reflectionCapture.stop();
+      return;
+    }
+    reflectionCapture.onEnd = async (transcript, audioBlob) => {
+      setRecording(false);
+      let finalText = (transcript || '').trim();
+      const skipServer = await shouldSkipServerTranscribe();
+      if (!skipServer && audioBlob && audioBlob.size > 0) {
+        try {
+          const whisperResult = await api.transcribe(audioBlob);
+          if (whisperResult.text) finalText = whisperResult.text;
+        } catch (err) {
+          console.log('PDF Converser: Whisper unavailable for reflection, using live transcript', err.message);
+        }
+      }
+      if (finalText) onFinal(finalText);
+      else alert('No speech detected. Try again.');
+    };
+    reflectionCapture.onError = (error) => {
+      setRecording(false);
+      alert(error === 'not-allowed'
+        ? 'Microphone permission denied. Please allow microphone access and try again.'
+        : `Speech recognition error: ${error}`);
+    };
+    setRecording(true);
+    reflectionCapture.start();
+  });
+}
+
+async function loadReflections() {
+  const container = document.getElementById('reflections-container');
+  if (!currentPdfId) {
+    container.innerHTML = '';
+    return;
+  }
+  try {
+    const data = await api.getReflections(currentPdfId);
+    renderReflections(data.reflections || []);
+  } catch (err) {
+    renderErrorState(container, err, 'Loading reflections');
+    console.error('PDF Converser sidebar error:', err);
+  }
+}
+
+function renderReflections(reflections) {
+  const container = document.getElementById('reflections-container');
+  container.innerHTML = `
+    <div class="reflection-header">Overall reflections</div>
+    <p class="reflection-hint">Your overall impressions of the paper — they frame the generated review.</p>
+    <div class="reflection-list"></div>
+    <div class="reflection-add-row">
+      <textarea class="reflection-input" placeholder="Overall impressions, final thoughts…"></textarea>
+      <button class="toolbar-btn reflection-mic-btn" title="Record a reflection">${REFLECTION_MIC_SVG}</button>
+      <button class="toolbar-btn review-primary reflection-add-btn" disabled>Add</button>
+    </div>
+  `;
+
+  const list = container.querySelector('.reflection-list');
+  for (const r of reflections) {
+    const card = document.createElement('div');
+    card.className = 'reflection-card';
+
+    const textEl = document.createElement('div');
+    textEl.className = 'reflection-text';
+    textEl.textContent = r.cleaned_text || r.raw_transcript || '';
+
+    // Same disclosure as note cards (reuses .note-raw styling).
+    const raw = document.createElement('details');
+    raw.className = 'note-raw';
+    const rawSummary = document.createElement('summary');
+    rawSummary.textContent = 'Raw transcript';
+    const rawText = document.createElement('p');
+    rawText.textContent = r.raw_transcript || '';
+    raw.append(rawSummary, rawText);
+
+    const meta = document.createElement('div');
+    meta.className = 'reflection-meta';
+    meta.textContent = r.created_at ? formatTime(r.created_at) : '';
+    if (r.cleanup_status === 'pending') {
+      const badge = document.createElement('span');
+      badge.className = 'reflection-pending';
+      badge.textContent = 'not cleaned';
+      badge.title = 'Saved as spoken — it could not be LLM-cleaned (offline or no API key). The raw text still feeds the review.';
+      meta.appendChild(badge);
+    }
+
+    // Same actions row as note cards (reuses .note-actions styling).
+    const actions = document.createElement('div');
+    actions.className = 'note-actions';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.title = 'Edit reflection text';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', () => openReflectionEditor(card, r));
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'note-delete';
+    delBtn.title = 'Delete this reflection';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this reflection?')) return;
+      try {
+        await api.deleteReflection(r.id, currentPdfId);
+        await loadReflections();
+      } catch (err) {
+        alert(`Failed to delete the reflection: ${err?.message || err}`);
+      }
+    });
+    actions.append(editBtn, delBtn);
+
+    card.append(textEl, raw, meta, actions);
+    list.appendChild(card);
+  }
+
+  const input = container.querySelector('.reflection-input');
+  const addBtn = container.querySelector('.reflection-add-btn');
+  input.addEventListener('input', () => {
+    addBtn.disabled = input.value.trim().length === 0;
+  });
+  addBtn.addEventListener('click', async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding…';
+    try {
+      // Typed text is stored verbatim; only voice transcripts get LLM cleanup.
+      await submitReflection(text, { skipCleanup: true });
+    } catch (err) {
+      addBtn.disabled = false;
+      addBtn.textContent = 'Add';
+      alert(`Failed to add the reflection: ${err?.message || err}`);
+    }
+  });
+
+  wireReflectionMic(container.querySelector('.reflection-mic-btn'), async (text) => {
+    try {
+      await submitReflection(text, { skipCleanup: false });
+    } catch (err) {
+      alert(`Failed to add the reflection: ${err?.message || err}`);
+    }
+  });
+}
+
+// Swap the reflection text for an inline textarea + save/cancel, mirroring
+// the note-card comment editor (and reusing its .note-comment-edit styling).
+// Saving updates cleaned_text and re-renders the list.
+function openReflectionEditor(card, reflection) {
+  const textEl = card.querySelector('.reflection-text');
+  if (!textEl || textEl.dataset.editing === '1') return;
+  textEl.dataset.editing = '1';
+  const prevHtml = textEl.innerHTML;
+  textEl.innerHTML = `
+    <textarea class="note-comment-edit"></textarea>
+    <div class="note-comment-edit-actions">
+      <button class="note-comment-save">Save</button>
+      <button class="note-comment-cancel">Cancel</button>
+    </div>
+  `;
+  const textarea = textEl.querySelector('textarea');
+  textarea.value = reflection.cleaned_text || reflection.raw_transcript || '';
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+  const restore = () => {
+    textEl.innerHTML = prevHtml;
+    delete textEl.dataset.editing;
+  };
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      restore();
+    }
+  });
+  textEl.querySelector('.note-comment-cancel').addEventListener('click', restore);
+  textEl.querySelector('.note-comment-save').addEventListener('click', async () => {
+    const value = textarea.value.trim();
+    if (!value) {
+      alert('Reflection text cannot be empty.');
+      return;
+    }
+    try {
+      await api.updateReflection(reflection.id, currentPdfId, { cleaned_text: value });
+      await loadReflections();
+    } catch (err) {
+      alert(`Failed to save the edit: ${err?.message || err}`);
+      restore();
+    }
+  });
+}
+
+// Saves a reflection and re-renders the list (which rebuilds the add row).
+async function submitReflection(text, { skipCleanup } = {}) {
+  await api.createReflection({
+    pdf_identifier: currentPdfId,
+    raw_transcript: text,
+    skip_cleanup: !!skipCleanup,
+  });
+  await loadReflections();
+}
+
+// Pre-generation nudge shown when the paper has no reflections yet. Resolves
+// 'skip' (generate without one), { text, fromVoice } (save it, then
+// generate), or null (cancel — don't generate). fromVoice tracks whether the
+// textarea content came from the mic so the transcript still gets LLM-cleaned
+// unless the user edited it.
+function promptReflectionNudge() {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'review-modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="review-modal" role="dialog" aria-label="Add a reflection">
+        <div class="review-modal-header">
+          <span>Add a reflection first?</span>
+          <button class="review-modal-close" title="Close" aria-label="Close">&times;</button>
+        </div>
+        <div class="review-modal-body">
+          <p class="review-modal-hint">Before drafting, take a moment to capture your overall impression of the paper — it frames and structures the generated review. Type or record it below, or skip straight to generating.</p>
+          <div class="reflection-add-row">
+            <textarea class="reflection-input" placeholder="Overall impressions, final thoughts…"></textarea>
+            <button class="toolbar-btn reflection-mic-btn" title="Record a reflection">${REFLECTION_MIC_SVG}</button>
+          </div>
+        </div>
+        <div class="review-modal-footer">
+          <button class="toolbar-btn reflection-skip">Skip</button>
+          <button class="toolbar-btn review-primary reflection-continue" disabled>Add &amp; Generate</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    const textarea = backdrop.querySelector('.reflection-input');
+    const continueBtn = backdrop.querySelector('.reflection-continue');
+    let fromVoice = false;
+    let escHandler;
+    const done = (value) => {
+      if (reflectionCapture) reflectionCapture.cancel();
+      backdrop.remove();
+      if (escHandler) document.removeEventListener('keydown', escHandler);
+      resolve(value);
+    };
+
+    const sync = () => { continueBtn.disabled = textarea.value.trim().length === 0; };
+    textarea.addEventListener('input', () => { fromVoice = false; sync(); });
+    wireReflectionMic(backdrop.querySelector('.reflection-mic-btn'), (text) => {
+      textarea.value = text;
+      fromVoice = true;
+      sync();
+    });
+
+    continueBtn.addEventListener('click', () => {
+      const text = textarea.value.trim();
+      if (text) done({ text, fromVoice });
+    });
+    backdrop.querySelector('.reflection-skip').addEventListener('click', () => done('skip'));
+    backdrop.querySelector('.review-modal-close').addEventListener('click', () => done(null));
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) done(null); });
+    escHandler = (e) => { if (e.key === 'Escape') done(null); };
+    document.addEventListener('keydown', escHandler);
+
+    textarea.focus();
+  });
+}
+
 // ─── Review tab ───────────────────────────────────────────────────────────
 //
 // Drafts a full peer review (free-form Markdown) from the manuscript text,
@@ -1783,6 +2101,25 @@ async function runGenerateReview() {
   if (!currentPdfId) { alert('Open a PDF first.'); return; }
   if (reviewGenerating) return;
   if (currentTab !== 'review') switchTab('review');
+
+  // No reflections yet — nudge for one before drafting. A failed count check
+  // must not block generation, so the default is to proceed as if skipped.
+  let nudgeChoice = 'skip';
+  try {
+    const { total } = await api.getReflections(currentPdfId);
+    if (total === 0) nudgeChoice = await promptReflectionNudge();
+  } catch (err) {
+    console.error('PDF Converser: reflection check failed, generating anyway', err);
+  }
+  if (nudgeChoice === null) return; // modal cancelled — don't generate
+  if (nudgeChoice !== 'skip') {
+    try {
+      await submitReflection(nudgeChoice.text, { skipCleanup: !nudgeChoice.fromVoice });
+    } catch (err) {
+      alert(`Failed to save the reflection: ${err?.message || err}`);
+      return;
+    }
+  }
 
   reviewGenerating = true;
   const genBtn = document.getElementById('generate-review-btn');

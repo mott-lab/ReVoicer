@@ -13,10 +13,11 @@ const { readExamples, reviewLlmOptions } = require('./review-generate-service');
 
 const STYLE_GUIDE_SYSTEM = `You are an expert writing analyst. You will be given one or more example peer reviews of academic manuscripts, all written by the same reviewer.
 
-Produce a concise, actionable writing style guide that captures how this reviewer writes. Cover: voice and tone, typical structure and section ordering, typical length and level of detail, formatting conventions (headers, lists, paragraphs), sentence style and word choice, and any recurring phrases or habits.
+Produce a concise, actionable writing style guide that captures how this reviewer writes. Cover: voice and tone, typical structure and section ordering, and level of detail, formatting conventions (headers, lists, paragraphs), sentence style and word choice, and any recurring phrases or habits.
 
 Guidelines:
 - Write the guide as direct, imperative guidance (e.g. "Use short declarative sentences."), not as commentary about the examples.
+- Describe length and thoroughness as scaling with the reviewer's material (how fully each point is developed), never as a fixed target length or word/section count — a review drafted from few annotations should come out short.
 - Do not include content specific to any one paper (topics, findings, author names).
 - The guide will be pasted into a "writing style guide" field that instructs an LLM drafting future reviews, so make every line usable as an instruction.
 - Output only the style guide, in Markdown. No preamble, no meta-commentary.`;

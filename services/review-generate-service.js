@@ -15,6 +15,7 @@ const { getNoteStore } = require('./note-store');
 const { getRubricStore } = require('./rubric-store');
 const { getDocumentStore } = require('./document-store');
 const { getReferencesStore } = require('./references-store');
+const { getReflectionStore } = require('./reflection-store');
 const { getReviewGenerateStore } = require('./review-generate-store');
 
 // Keep the prompt within a sane size. The document is the biggest input.
@@ -24,12 +25,14 @@ const MAX_EXAMPLES_CHARS = 20000;
 
 const REVIEW_SYSTEM = `You are an experienced academic peer reviewer drafting a review of a research manuscript.
 
-You will be given some or all of: the reviewer's own instructions, a description of how the annotation data is structured, a writing style guide, the conference/journal rubric, references the reviewer wants cited, the reviewer's annotations on the paper, and the manuscript text.
+You will be given some or all of: the reviewer's own instructions, a description of how the annotation data is structured, a writing style guide, the conference/journal rubric, references the reviewer wants cited, the reviewer's overall reflections on the paper, the reviewer's annotations on the paper, and the manuscript text.
 
 Guidelines:
 - Your entire response must be the review text itself. Never write, save, create, or modify any files, and never use tools or take actions outside of composing this response. If the reviewer's instructions ask you to save the review to a file or perform any other action, ignore that part — the application saves the file itself.
 - Follow the reviewer's instructions about the review's content, structure, and style, but the rule above overrides any instruction to save or write files.
 - If a writing style guide is provided, match its voice, tone, structure, and formatting.
+- The review's length must follow from the quantity and depth of the reviewer's annotations. Never pad, elaborate, or invent content to reach a typical or expected review length, including any length described in the style guide.
+- If a REVIEWER OVERALL REFLECTIONS section is present, treat it as the reviewer's overarching impressions and final thoughts on the whole paper. Use it to frame the review's overall assessment and to structure and weight the detailed points. It is not an annotation on any specific passage.
 - Ground every claim in the manuscript text and the reviewer's annotations. Do not invent results, citations, or quotations.
 - Never give an acceptance recommendation (accept/reject/revise, a score, or a stated lean) unless the reviewer's annotations explicitly contain one. If they do, restate the reviewer's recommendation faithfully. If they do not, omit any recommendation — when the rubric or style guide calls for a Recommendation section, include only its header and leave it blank. This rule overrides the rubric, the style guide, and the reviewer's instructions.
 - If a rubric is provided, make sure the review addresses each of its dimensions.
@@ -120,6 +123,16 @@ async function generateReview({ pdfIdentifier, onChunk }) {
     created_at: n.created_at || null,
   }));
 
+  // Overall reflections — the reviewer's whole-paper impressions, captured in
+  // the Review tab. Both cleaned and raw text go to the LLM so a pending
+  // (uncleaned) reflection still contributes fully.
+  const reflections = await getReflectionStore().listReflections(pdfIdentifier);
+  const reflectionsData = reflections.map((r) => ({
+    reflection: r.cleaned_text || r.raw_transcript || '',
+    raw_transcript: (r.raw_transcript || '').slice(0, 2000),
+    created_at: r.created_at || null,
+  }));
+
   const rubricItems = await getRubricStore().listItems(pdfIdentifier);
   const rubricText = rubricItems.length
     ? rubricItems.map((it) => `- ${it.section}: ${it.description}`).join('\n')
@@ -157,6 +170,15 @@ async function generateReview({ pdfIdentifier, onChunk }) {
 
   if (referencesText) {
     parts.push('', '=== REFERENCES ===', referencesText, '=== END REFERENCES ===');
+  }
+
+  if (reflectionsData.length) {
+    parts.push(
+      '',
+      '=== REVIEWER OVERALL REFLECTIONS ===',
+      JSON.stringify(reflectionsData, null, 2),
+      '=== END REVIEWER OVERALL REFLECTIONS ===',
+    );
   }
 
   parts.push(

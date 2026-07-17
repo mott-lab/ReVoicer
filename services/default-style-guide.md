@@ -25,6 +25,7 @@ This document describes the writing style used in the example academic paper rev
 - **Line numbers and section references are specific.** "line 318", "Sec. 3.2", "Fig. 4", "the first sentence of the abstract". This gives authors something concrete to act on.
 - **Edit suggestions use the arrow notation:** `"developers are allowed to extensive modify" -> "...extensively modify"`.
 - **Numbers and units stay tight.** Don't pad with extra modifiers.
+- **Length follows the reviewer's material.** Let the review's overall length follow from the quantity and depth of the reviewer's notes. Treat the bullet counts and section lengths below as ceilings for well-supported material, not quotas. Never pad or invent content to reach a typical review length.
 
 ---
 
@@ -202,6 +203,7 @@ These push authors to justify or clarify rather than declaring them wrong outrig
 - Bare critiques with no suggested direction.
 - Listing every non-significant statistical result; suggest moving these to an appendix.
 - A "Conclusion" or "Summary" at the end that repeats earlier points.
+- Padding the review to reach an expected length.
 
 ---
 

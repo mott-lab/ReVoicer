@@ -964,6 +964,92 @@ button.note-section-pill:hover {
   border-color: #4285f4;
 }
 
+/* === Reflections (Review tab) === */
+
+#reflections-container {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+.reflection-header {
+  font-weight: 600;
+  font-size: 13px;
+  margin: 0 0 2px;
+}
+
+.reflection-hint {
+  font-size: 11px;
+  color: #666;
+  margin: 0 0 8px;
+}
+
+.reflection-card {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.reflection-text {
+  white-space: pre-wrap;
+}
+
+.reflection-meta {
+  font-size: 10px;
+  color: #888;
+  margin-top: 4px;
+}
+
+.reflection-pending {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  background: #fff3e0;
+  color: #b26a00;
+  margin-left: 6px;
+}
+
+.reflection-add-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.reflection-input {
+  flex: 1;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.reflection-input:focus {
+  outline: none;
+  border-color: #4285f4;
+}
+
+.reflection-mic-btn.recording {
+  background: #fdecea;
+  border-color: #c62828;
+  color: #c62828;
+  animation: reflection-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes reflection-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 .review-error {
   background: #fff3f3;
   border: 1px solid #f5c6cb;
