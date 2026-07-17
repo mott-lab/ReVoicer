@@ -62,11 +62,10 @@ class ReviewCheckStore {
     }
   }
 
-  async save(contentHash, { rubric_text, components }) {
+  async save(contentHash, { sections }) {
     const record = {
       content_hash: contentHash,
-      rubric_text: rubric_text || '',
-      components: Array.isArray(components) ? components : [],
+      sections: Array.isArray(sections) ? sections : [],
       checked_at: new Date().toISOString(),
     };
     return this._withLock(contentHash, async () => {

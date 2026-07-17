@@ -4,6 +4,8 @@ const api = new ApiClient();
 let currentPdfId = null;
 let currentTab = 'notes';
 let rubricTemplates = []; // cached saved rubric templates (dropdown + dup-name check)
+let rubricCheck = null; // latest persisted coverage check for the open PDF
+let rubricCheckError = null; // message from the most recent failed/empty check attempt
 
 // True while an inline note editor (the comment textarea) is open. While set,
 // loadNotes() defers its destructive `container.innerHTML` re-render so a note
@@ -66,6 +68,8 @@ async function init() {
       const newId = msg.pdfIdentifier;
       if (newId && newId !== currentPdfId) {
         currentPdfId = newId;
+        rubricCheck = null;
+        rubricCheckError = null;
         const titleEl = document.getElementById('pdf-title');
         if (titleEl) titleEl.textContent = msg.pdfTitle || 'Untitled PDF';
         document.getElementById('view-mode').value = 'chronological';
@@ -77,6 +81,8 @@ async function init() {
         else if (currentTab === 'review' && !reviewGenerating) loadReview();
       } else if (!newId) {
         currentPdfId = null;
+        rubricCheck = null;
+        rubricCheckError = null;
         const titleEl = document.getElementById('pdf-title');
         if (titleEl) titleEl.textContent = 'No PDF open';
         document.getElementById('notes-container').innerHTML =
@@ -113,12 +119,15 @@ async function init() {
   document.getElementById('export-btn').addEventListener('click', exportMarkdown);
   document.getElementById('export-json-btn').addEventListener('click', exportJson);
 
-  // Check Review button (in the Rubric toolbar) — opens a modal that compares
-  // notes against the rubric sections in the Rubric tab. The last result is
-  // persisted per PDF, so reopening shows the previous state and a Re-check
-  // button. Disabled until the rubric has at least one non-empty section.
-  document.getElementById('check-review-btn').addEventListener('click', openReviewCheckModal);
-  document.getElementById('rubric-container').addEventListener('input', updateCheckReviewButtonState);
+  // Check Review button (in the Rubric toolbar) — judges each rubric section
+  // against the notes and paints the verdicts onto the section cards. The
+  // result is persisted per PDF so the coverage stays visible across visits.
+  // Disabled until the rubric has at least one non-empty section.
+  document.getElementById('check-review-btn').addEventListener('click', runRubricCoverageCheck);
+  document.getElementById('rubric-container').addEventListener('input', (e) => {
+    updateCheckReviewButtonState();
+    markCoverageStaleness(e.target.closest('.rubric-card'));
+  });
 
   // Clean pending button — LLM-cleans notes that were saved in offline mode,
   // one at a time. Hidden unless the current PDF has pending notes.
@@ -526,7 +535,12 @@ async function loadRubric() {
   const loading = document.getElementById('loading');
   loading.style.display = 'flex';
   try {
-    const data = await api.listRubric(currentPdfId);
+    const [data, check] = await Promise.all([
+      api.listRubric(currentPdfId),
+      // A failed read of the saved coverage check shouldn't block the editor.
+      api.getReviewCheck(currentPdfId).catch(() => null),
+    ]);
+    rubricCheck = (check && !check.empty && Array.isArray(check.sections)) ? check : null;
     renderRubricList(data.items || [], container);
   } catch (err) {
     renderErrorState(container, err, 'Loading the rubric');
@@ -543,11 +557,28 @@ function renderRubricList(items, container) {
       '<p class="empty-state">No rubric sections yet. Add a section the review should cover (e.g. Novelty, Soundness, Clarity).</p>';
     return;
   }
-  container.innerHTML = items.map(renderRubricCard).join('');
+  const resultsById = new Map(
+    (rubricCheck?.sections || []).map((s) => [s.rubric_item_id, s])
+  );
+  container.innerHTML = renderCoverageMeta()
+    + items.map((item) => renderRubricCard(item, resultsById.get(item.id))).join('');
   attachRubricHandlers(container);
+  attachCoverageEvidenceHandlers(container);
 }
 
-function renderRubricCard(item) {
+// Header line above the cards: last-checked time plus any message from the
+// most recent check attempt. Empty when no check has run and nothing failed.
+function renderCoverageMeta() {
+  const errorLine = rubricCheckError
+    ? `<div class="review-error">${escapeHtml(rubricCheckError)}</div>`
+    : '';
+  const checkedLine = (rubricCheck && rubricCheck.checked_at)
+    ? `<div class="rubric-coverage-meta">Coverage last checked: ${formatTime(rubricCheck.checked_at)}</div>`
+    : '';
+  return errorLine + checkedLine;
+}
+
+function renderRubricCard(item, coverageResult) {
   return `
     <div class="rubric-card" data-id="${escapeAttr(item.id)}">
       <div class="rubric-row">
@@ -558,11 +589,76 @@ function renderRubricCard(item) {
         <label class="rubric-label">Description</label>
         <textarea class="rubric-input rubric-textarea" data-field="description" placeholder="What this section should address">${escapeHtml(item.description || '')}</textarea>
       </div>
+      ${renderCoverageBlock(item, coverageResult)}
       <div class="rubric-actions">
         <button class="rubric-delete" title="Delete this rubric section">Delete</button>
       </div>
     </div>
   `;
+}
+
+// Coverage verdict painted onto a rubric card. Three cases: no check has run
+// (nothing rendered), a check exists but didn't include this section ("not
+// checked yet"), or a verdict with a gap summary and evidence links. The
+// snapshot data attributes let the input listener flag live edits as stale
+// without a re-render.
+function renderCoverageBlock(item, result) {
+  if (!rubricCheck) return '';
+  if (!result) {
+    return '<div class="rubric-coverage rubric-coverage-none">Not checked yet — click Check Review to include this section.</div>';
+  }
+  const status = ['covered', 'partial', 'missing'].includes(result.status) ? result.status : 'partial';
+  const snapSection = result.section || '';
+  const snapDescription = result.description || '';
+  const stale = snapSection !== (item.section || '').trim()
+    || snapDescription !== (item.description || '').trim();
+  const evidence = Array.isArray(result.evidence) ? result.evidence : [];
+  const evidenceHtml = evidence.length
+    ? `<div class="review-component-evidence">Evidence: ${evidence.map((e) =>
+        `<a data-note-id="${escapeAttr(e.id)}" data-page="${e.page_number || 0}" title="Scroll to this annotation">page ${e.page_number || '?'} — "${escapeHtml(e.preview || '')}"</a>`
+      ).join(', ')}</div>`
+    : '';
+  const gapHtml = result.gap_summary
+    ? `<div class="review-component-gap">${escapeHtml(result.gap_summary)}</div>`
+    : '';
+  return `
+    <div class="rubric-coverage${stale ? ' rubric-coverage-stale' : ''}"
+         data-snap-section="${escapeAttr(snapSection)}"
+         data-snap-description="${escapeAttr(snapDescription)}">
+      <div class="review-component-header">
+        <span class="review-status-dot review-status-${status}" title="${status}"></span>
+        <span class="rubric-coverage-status">${status}</span>
+        <span class="rubric-coverage-stale-note">edited since last check</span>
+      </div>
+      ${gapHtml}
+      ${evidenceHtml}
+    </div>
+  `;
+}
+
+function attachCoverageEvidenceHandlers(container) {
+  container.querySelectorAll('.rubric-coverage .review-component-evidence a').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      chrome.runtime.sendMessage({
+        action: 'scrollToHighlight',
+        noteId: a.dataset.noteId,
+        pageNumber: parseInt(a.dataset.page, 10) || 0,
+      }).catch(() => {});
+    });
+  });
+}
+
+// Live staleness: when a card's fields diverge from the snapshot its verdict
+// ran against, flag the verdict; un-flag if the user reverts the edit.
+function markCoverageStaleness(card) {
+  const cov = card?.querySelector('.rubric-coverage');
+  if (!cov || !('snapSection' in cov.dataset)) return;
+  const section = (card.querySelector('[data-field="section"]')?.value || '').trim();
+  const description = (card.querySelector('[data-field="description"]')?.value || '').trim();
+  const stale = section !== cov.dataset.snapSection
+    || description !== cov.dataset.snapDescription;
+  cov.classList.toggle('rubric-coverage-stale', stale);
 }
 
 function attachRubricHandlers(container) {
@@ -638,21 +734,20 @@ async function addBlankRubricItem() {
 // Read the rubric currently shown in the tab (including unsaved edits still in
 // the inputs) as plain {section, description} pairs.
 function currentRubricItemsFromDom() {
+  return currentRubricItemsWithIds().map(({ section, description }) => ({ section, description }));
+}
+
+// Same, but keeps each card's store id — the coverage check needs ids so
+// verdicts map back onto the cards. Kept separate so template saving doesn't
+// persist ids it doesn't use.
+function currentRubricItemsWithIds() {
   const items = [];
   document.querySelectorAll('#rubric-container .rubric-card').forEach((card) => {
     const section = (card.querySelector('[data-field="section"]')?.value || '').trim();
     const description = (card.querySelector('[data-field="description"]')?.value || '').trim();
-    if (section || description) items.push({ section, description });
+    if (section || description) items.push({ id: card.dataset.id, section, description });
   });
   return items;
-}
-
-// Flatten the rubric tab's items into the free-form text the check LLM expects.
-function rubricTextFromItems(items) {
-  return items.map((it, i) => {
-    const head = it.section || `Section ${i + 1}`;
-    return it.description ? `${i + 1}. ${head} — ${it.description}` : `${i + 1}. ${head}`;
-  }).join('\n');
 }
 
 // Enabled iff the rubric tab currently shows at least one non-empty section.
@@ -1566,225 +1661,43 @@ async function exportJson() {
   }
 }
 
-// ─── Review Check modal ───────────────────────────────────────────────────
+// ─── Review coverage check ─────────────────────────────────────────────────
 //
-// Single live modal at a time. The DOM tree is built once per open; phase
-// changes (loading → loaded → error) just swap the body + footer contents.
-// The rubric comes from the Rubric tab's sections, not a paste step.
+// Judges each rubric section against the notes (one verdict per section) and
+// persists the result. The report renders directly on the Rubric tab's cards
+// (see renderRubricCard / renderCoverageBlock) so it stays visible instead of
+// living in a dismissable modal.
 
-let reviewModalEl = null;
-let reviewEscHandler = null;
-
-function closeReviewModal() {
-  if (reviewModalEl) {
-    reviewModalEl.remove();
-    reviewModalEl = null;
-  }
-  if (reviewEscHandler) {
-    document.removeEventListener('keydown', reviewEscHandler);
-    reviewEscHandler = null;
-  }
-}
-
-async function openReviewCheckModal() {
+async function runRubricCoverageCheck() {
   if (!currentPdfId) {
     alert('Open a PDF first.');
     return;
   }
-  if (reviewModalEl) return; // already open
+  const items = currentRubricItemsWithIds();
   // The button is disabled until the rubric has a non-empty section, so this
   // is just a defensive guard.
-  if (currentRubricItemsFromDom().length === 0) return;
+  if (items.length === 0) return;
 
-  reviewModalEl = document.createElement('div');
-  reviewModalEl.className = 'review-modal-backdrop';
-  reviewModalEl.innerHTML = `
-    <div class="review-modal" role="dialog" aria-label="Check Review">
-      <div class="review-modal-header">
-        <span>Check Review</span>
-        <button class="review-modal-close" title="Close" aria-label="Close">×</button>
-      </div>
-      <div class="review-modal-body"></div>
-      <div class="review-modal-footer"></div>
-    </div>
-  `;
-  document.body.appendChild(reviewModalEl);
-
-  reviewModalEl.querySelector('.review-modal-close').addEventListener('click', closeReviewModal);
-  // Backdrop click closes; click inside the inner card must not bubble out
-  // and trigger the close.
-  reviewModalEl.addEventListener('click', (e) => {
-    if (e.target === reviewModalEl) closeReviewModal();
-  });
-  reviewEscHandler = (e) => { if (e.key === 'Escape') closeReviewModal(); };
-  document.addEventListener('keydown', reviewEscHandler);
-
-  // Fetch persisted state. On error (e.g. a store read failure) fall back to
-  // the empty input view so the user can still attempt to run a check.
-  let saved = null;
+  const btn = document.getElementById('check-review-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = 'Checking…';
   try {
-    const resp = await api.getReviewCheck(currentPdfId);
-    if (resp && !resp.empty) saved = resp;
-  } catch (err) {
-    console.error('Review check: failed to load saved state', err);
-  }
-
-  if (saved && Array.isArray(saved.components) && saved.rubric_text) {
-    renderReviewLoaded(saved);
-  } else {
-    runReviewCheck(rubricTextFromItems(currentRubricItemsFromDom()));
-  }
-}
-
-function renderReviewLoading() {
-  if (!reviewModalEl) return;
-  const body = reviewModalEl.querySelector('.review-modal-body');
-  const footer = reviewModalEl.querySelector('.review-modal-footer');
-  body.innerHTML = `
-    <div class="loading" style="padding: 32px;">
-      <div class="spinner"></div>
-      <span>Analyzing review against rubric...</span>
-    </div>
-  `;
-  footer.innerHTML = '';
-}
-
-function renderReviewLoaded(saved) {
-  if (!reviewModalEl) return;
-  const body = reviewModalEl.querySelector('.review-modal-body');
-  const footer = reviewModalEl.querySelector('.review-modal-footer');
-
-  const rubricText = saved.rubric_text || '';
-  const checkedAtLine = saved.checked_at
-    ? `<div class="review-checked-at">Last checked: ${formatTime(saved.checked_at)}</div>`
-    : '';
-  const parseErrorLine = saved.parse_error
-    ? `<div class="review-error">The model returned non-JSON output. Try Re-check, or adjust the rubric text.</div>`
-    : '';
-  const emptyLine = (saved.note_count === 0)
-    ? `<div class="review-empty">No annotations yet — highlight text in the PDF and add some notes, then come back.</div>`
-    : '';
-
-  body.innerHTML = `
-    <details class="review-rubric-details">
-      <summary>Rubric used</summary>
-      <div class="review-rubric-text">${escapeHtml(rubricText)}</div>
-    </details>
-    ${checkedAtLine}
-    ${parseErrorLine}
-    ${emptyLine}
-    <div class="review-components"></div>
-  `;
-  renderReviewComponents(saved.components || [], body.querySelector('.review-components'));
-
-  footer.innerHTML = `
-    <button class="toolbar-btn review-cancel">Close</button>
-    <button class="toolbar-btn review-primary">Re-check</button>
-  `;
-  footer.querySelector('.review-cancel').addEventListener('click', closeReviewModal);
-  // Re-check reads the Rubric tab at click time so edits made since the last
-  // check are picked up.
-  footer.querySelector('.review-primary').addEventListener('click', () => {
-    runReviewCheck(rubricTextFromItems(currentRubricItemsFromDom()));
-  });
-}
-
-function renderReviewError(message, rubricText, showRetry = true) {
-  if (!reviewModalEl) return;
-  const body = reviewModalEl.querySelector('.review-modal-body');
-  const footer = reviewModalEl.querySelector('.review-modal-footer');
-  body.innerHTML = `
-    <div class="review-error">${escapeHtml(message)}</div>
-    <details class="review-rubric-details" open>
-      <summary>Rubric used</summary>
-      <div class="review-rubric-text">${escapeHtml(rubricText || '')}</div>
-    </details>
-  `;
-  footer.innerHTML = `
-    <button class="toolbar-btn review-cancel">Close</button>
-    ${showRetry ? '<button class="toolbar-btn review-primary">Try again</button>' : ''}
-  `;
-  footer.querySelector('.review-cancel').addEventListener('click', closeReviewModal);
-  const retry = footer.querySelector('.review-primary');
-  if (retry) {
-    retry.addEventListener('click', () => {
-      runReviewCheck((rubricText || '').trim());
-    });
-  }
-}
-
-function renderReviewComponents(components, container) {
-  if (!container) return;
-  if (!components || components.length === 0) {
-    container.innerHTML = '';
-    return;
-  }
-  container.innerHTML = components.map((c) => {
-    const status = ['covered', 'partial', 'missing'].includes(c.status) ? c.status : 'partial';
-    const evidence = Array.isArray(c.evidence) ? c.evidence : [];
-    const evidenceHtml = evidence.length
-      ? `<div class="review-component-evidence">Evidence: ${evidence.map((e) =>
-          `<a data-note-id="${escapeAttr(e.id)}" data-page="${e.page_number || 0}" title="Scroll to this annotation">page ${e.page_number || '?'} — "${escapeHtml(e.preview || '')}"</a>`
-        ).join(', ')}</div>`
-      : '';
-    const gapHtml = c.gap_summary
-      ? `<div class="review-component-gap">${escapeHtml(c.gap_summary)}</div>`
-      : '';
-    const descHtml = c.description
-      ? `<div class="review-component-desc">${escapeHtml(c.description)}</div>`
-      : '';
-    return `
-      <div class="review-component">
-        <div class="review-component-header">
-          <span class="review-status-dot review-status-${status}" title="${status}"></span>
-          <span>${escapeHtml(c.title || 'Untitled')}</span>
-        </div>
-        ${descHtml}
-        ${evidenceHtml}
-        ${gapHtml}
-      </div>
-    `;
-  }).join('');
-
-  container.querySelectorAll('.review-component-evidence a').forEach((a) => {
-    a.addEventListener('click', (e) => {
-      e.preventDefault();
-      const noteId = a.dataset.noteId;
-      const pageNumber = parseInt(a.dataset.page, 10) || 0;
-      chrome.runtime.sendMessage({
-        action: 'scrollToHighlight',
-        noteId,
-        pageNumber,
-      }).catch(() => {});
-    });
-  });
-}
-
-async function runReviewCheck(rubricText) {
-  if (!currentPdfId) return;
-  if (!rubricText) {
-    renderReviewError('No rubric sections found. Close this dialog and add sections in the Rubric tab.', '', false);
-    return;
-  }
-  renderReviewLoading();
-  try {
-    const result = await api.runReviewCheck(currentPdfId, rubricText);
+    const result = await api.runReviewCheck(currentPdfId, items);
     if (result && result.note_count === 0) {
-      // No notes — server returned a stub with no components.
-      renderReviewLoaded({
-        rubric_text: rubricText,
-        components: [],
-        note_count: 0,
-        checked_at: null,
-      });
-      return;
+      rubricCheckError = 'No annotations yet — highlight text in the PDF and add some notes, then check again.';
+    } else if (result && result.parse_error) {
+      rubricCheckError = 'The model returned unexpected output. Try Check Review again.';
+    } else {
+      rubricCheckError = null;
     }
-    renderReviewLoaded(result);
   } catch (err) {
-    const d = describeApiError(err, 'Check');
-    // Config problems (missing key, offline mode, rejected key) aren't worth a
-    // retry button — the fix lives in Settings.
-    renderReviewError(d.text, rubricText, d.kind === 'internal');
+    rubricCheckError = describeApiError(err, 'Check').text;
+  } finally {
+    btn.textContent = originalLabel;
+    // loadRubric re-renders the cards with the fresh result and restores the
+    // button's enabled state via updateCheckReviewButtonState.
+    await loadRubric();
   }
 }
 

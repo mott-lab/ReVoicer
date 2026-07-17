@@ -82,9 +82,14 @@ They then spoke their annotation aloud. The raw speech transcript may contain:
 - False starts and self-corrections
 - Rambling or repetitive phrasing
 - Incomplete sentences
+- Doubling back: returning to an earlier point later in the recording to add detail, clarify, or correct it
 
 Your task:
-1. Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not remove any substantive points they made. Just clean up the delivery. When the transcript mentions a work that matches an entry in the reference library above, replace the loose mention with the proper author + title (and link in parentheses if available).
+1. Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their distinct intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not drop any substantive point they made. Just clean up the delivery.
+
+   The speaker often DOUBLES BACK: they raise a point early, move on to something else, then return to that first point later to add detail, clarify, or correct it. When this happens, MERGE every statement about the same point into ONE coherent point, placed where they first raised it — do not emit the revisited point as a second, separate item. Treat later remarks as enriching that single point, and treat a later correction as the speaker's final intent (drop the version it supersedes). Consolidating repeated mentions of the SAME idea is NOT removing content: aim for one well-developed point per distinct idea, not one item per time they happened to mention it. When two mentions are genuinely about different ideas, keep them separate.
+
+   When the transcript mentions a work that matches an entry in the reference library above, replace the loose mention with the proper author + title (and link in parentheses if available).
 
 2. Classify the comment with one or more tags from this list. Use multiple tags ONLY when the comment genuinely spans categories (e.g. a strength that also leads to a suggestion). Most comments need just one tag.
 ${TAG_DESCRIPTIONS}

@@ -253,7 +253,7 @@ const routes = {
   'POST /api/review-check/': async ({ body }) => {
     return checkReview({
       pdfIdentifier: body.pdf_identifier,
-      rubricText: body.rubric_text || '',
+      rubricItems: body.rubric_items || [],
     });
   },
 

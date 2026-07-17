@@ -779,6 +779,53 @@ button.note-section-pill:hover {
   font-family: inherit;
 }
 
+/* Coverage verdict painted onto a rubric card by the Check Review run.
+   Reuses the .review-status-dot / evidence / gap styles below. */
+.rubric-coverage {
+  border-top: 1px dashed #eee;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.rubric-coverage-none {
+  font-size: 11px;
+  color: #999;
+  font-style: italic;
+}
+
+.rubric-coverage-status {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+/* The stale note is present in the markup but only shown once the card's
+   fields diverge from the snapshot the verdict ran against. */
+.rubric-coverage-stale-note {
+  display: none;
+  font-size: 11px;
+  color: #b26a00;
+  background: #fff8e1;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: auto;
+}
+
+.rubric-coverage-stale .rubric-coverage-stale-note {
+  display: inline-block;
+}
+
+.rubric-coverage-stale .review-status-dot,
+.rubric-coverage-stale .rubric-coverage-status {
+  opacity: 0.45;
+}
+
+.rubric-coverage-meta {
+  font-size: 11px;
+  color: #999;
+  margin-bottom: 8px;
+}
+
 .rubric-actions {
   display: flex;
   justify-content: flex-end;
@@ -915,42 +962,6 @@ button.note-section-pill:hover {
 .review-rubric-input:focus {
   outline: none;
   border-color: #4285f4;
-}
-
-.review-rubric-details {
-  margin-bottom: 10px;
-}
-
-.review-rubric-details summary {
-  cursor: pointer;
-  color: #666;
-  font-size: 12px;
-  padding: 4px 0;
-  user-select: none;
-}
-
-.review-rubric-details summary:hover {
-  color: #333;
-}
-
-/* Read-only display of the rubric text a check ran against. */
-.review-rubric-text {
-  white-space: pre-wrap;
-  font-size: 12px;
-  color: #555;
-  background: #f7f7f7;
-  border: 1px solid #eee;
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin-top: 6px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.review-checked-at {
-  font-size: 11px;
-  color: #999;
-  margin-bottom: 8px;
 }
 
 .review-error {
@@ -1101,15 +1112,6 @@ button.note-section-pill:hover {
   max-height: none;
 }
 
-.review-component {
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.review-component:last-child {
-  border-bottom: none;
-}
-
 .review-component-header {
   display: flex;
   align-items: center;
@@ -1129,13 +1131,6 @@ button.note-section-pill:hover {
 .review-status-covered { background: #4caf50; }
 .review-status-partial { background: #ffa726; }
 .review-status-missing { background: #ef5350; }
-
-.review-component-desc {
-  color: #666;
-  font-size: 12px;
-  margin-top: 4px;
-  margin-left: 18px;
-}
 
 .review-component-evidence {
   font-size: 11px;
