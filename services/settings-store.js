@@ -58,6 +58,10 @@ const DEFAULTS = {
   // fine — the keyless pool works at low volume, a key just raises rate limits.
   semantic_scholar_api_key: '',
 
+  // Optional path to a BibTeX (.bib) reference library, searchable from the
+  // sidebar's References tab. Re-read automatically when the file changes.
+  bib_file_path: '',
+
   // Review generation has its own provider selector + credentials (mirrors the
   // text_* fields) so a different/stronger model can draft reviews. The Settings
   // UI offers an "Autofill from Text Processing" button to copy the text keys.

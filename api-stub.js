@@ -20,6 +20,7 @@ const { generateReview, getSavedReview, saveReview } = require('./services/revie
 const { getReviewGenerateStore } = require('./services/review-generate-store');
 const { getReflectionStore } = require('./services/reflection-store');
 const { getReferencesStore } = require('./services/references-store');
+const { getBibLibrary } = require('./services/bib-library-service');
 const { getRubricStore } = require('./services/rubric-store');
 const { extractRubricItems } = require('./services/rubric-extract-service');
 const { getRubricTemplatesStore } = require('./services/rubric-templates-store');
@@ -409,6 +410,17 @@ const routes = {
     const ok = await getReferencesStore().deleteReference(query.pdf_identifier, params.id);
     if (!ok) return { __status: 404, error: 'Reference not found' };
     return { ok: true };
+  },
+
+  // ─── Bib Library ───────────────────────────────────────────────────────
+  // Global (not per-PDF): the user's .bib file configured in Settings.
+
+  'GET /api/bib/status': async () => {
+    return getBibLibrary().getStatus();
+  },
+
+  'GET /api/bib/search': async ({ query }) => {
+    return getBibLibrary().search(query.q || '');
   },
 
   // ─── Rubric ────────────────────────────────────────────────────────────

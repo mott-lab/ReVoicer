@@ -129,14 +129,14 @@ window.desktop = {
   openPdfDialog: () => ipcRenderer.invoke('desktop:openPdfDialog'),
   openPdfPath: (absPath) => ipcRenderer.invoke('desktop:openPdfPath', absPath),
   getRecentFiles: () => ipcRenderer.invoke('desktop:getRecentFiles'),
-  openSettings: () => ipcRenderer.invoke('desktop:openSettings'),
+  openSettings: (tab) => ipcRenderer.invoke('desktop:openSettings', tab),
   getSettings: () => ipcRenderer.invoke('desktop:getSettings'),
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
   llmStatus: (opts) => ipcRenderer.invoke('desktop:llmStatus', opts),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
-  selectFile: () => ipcRenderer.invoke('desktop:selectFile'),
+  selectFile: (filters) => ipcRenderer.invoke('desktop:selectFile', filters),
   generateReview: (pdfIdentifier) => ipcRenderer.invoke('desktop:generateReview', pdfIdentifier),
   generateStyleGuide: (overrides) => ipcRenderer.invoke('desktop:generateStyleGuide', overrides),
   chooseSavePath: (defaultPath) => ipcRenderer.invoke('desktop:chooseSavePath', defaultPath),
@@ -146,6 +146,12 @@ window.desktop = {
 // to (same pattern as the whisper/vosk progress toasts above).
 ipcRenderer.on('desktop:reviewChunk', (_e, payload) => {
   window.dispatchEvent(new CustomEvent('pdfc-review-chunk', { detail: payload }));
+});
+
+// Deep-link into a Settings tab when the window is already open (fresh opens
+// use the URL hash instead). Only settings.html listens; inert elsewhere.
+ipcRenderer.on('desktop:switchSettingsTab', (_e, tab) => {
+  window.dispatchEvent(new CustomEvent('pdfc-switch-settings-tab', { detail: tab }));
 });
 
 // The settings window lives in its own BrowserWindow; when settings are saved

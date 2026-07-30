@@ -167,6 +167,17 @@ maintain by hand. Entries are fed to the cleanup LLM as context so
 "related work" annotations can name the right papers, and are included
 in generated reviews so they can be cited verbatim.
 
+You can also attach a personal BibTeX library: choose a `.bib` file in
+Settings → References and the tab shows a status line (loaded / entry
+count / errors) plus a search box. Search matches every field of every
+entry (authors, title, venue, year, keywords, ...); clicking a result
+adds it to the paper's reference list with its authors, title, and a
+DOI/URL link. The file is re-read automatically whenever it changes on
+disk, so no restart is needed after your library updates. Recommended
+setup: Zotero with the Better BibTeX plugin, using an auto-export with
+"Keep updated" — your whole library stays available as one continuously
+refreshed `.bib` file.
+
 ### Rubric and Review Tabs
 
 For writing a structured review of the paper:
@@ -268,7 +279,10 @@ Autofill button copies the Text Processing keys), plus:
   are ignored.
 
 **References** — optional Semantic Scholar API key for citation lookups
-(the keyless shared pool works at low volume; a key raises rate limits).
+(the keyless shared pool works at low volume; a key raises rate limits),
+and an optional BibTeX file — a `.bib` library searchable from the
+sidebar's References tab (auto-reloaded whenever the file changes; a
+Zotero Better BibTeX auto-export works well).
 
 **User Interface** — auto-color highlights by comment type.
 

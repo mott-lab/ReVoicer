@@ -60,9 +60,11 @@ async function init() {
       scrollToAndFlashNote(msg.noteId);
     }
     // Settings saved (e.g. offline mode toggled) — refresh the notes view so
-    // the "Clean pending" button state reflects the new mode.
+    // the "Clean pending" button state reflects the new mode. The bib library
+    // path may also have changed, so refresh its status when visible.
     if (msg.action === 'settingsChanged') {
       if (currentTab === 'notes') loadNotes();
+      if (currentTab === 'references') loadBibStatus();
     }
     if (msg.action === 'tabChanged') {
       const newId = msg.pdfIdentifier;
@@ -160,6 +162,19 @@ async function init() {
     addBlankReference();
   });
 
+  // Bib library search (References tab) — debounced dropdown; Escape closes.
+  const bibInput = document.getElementById('bib-search-input');
+  bibInput.addEventListener('input', () => {
+    clearTimeout(bibSearchTimer);
+    bibSearchTimer = setTimeout(runBibSearch, 200);
+  });
+  bibInput.addEventListener('focus', () => {
+    if (bibInput.value.trim()) runBibSearch();
+  });
+  bibInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideBibDropdown();
+  });
+
   // Add Rubric section button — appends an empty row that the user fills in.
   document.getElementById('add-rubric-btn').addEventListener('click', () => {
     addBlankRubricItem();
@@ -209,6 +224,8 @@ function switchTab(tab) {
   notesToolbar.style.display = 'none';
   questionsToolbar.style.display = 'none';
   referencesToolbar.style.display = 'none';
+  document.getElementById('bib-search-row').style.display = 'none';
+  hideBibDropdown();
   rubricToolbar.style.display = 'none';
   reviewGenerateRow.style.display = 'none';
   notesContainer.style.display = 'none';
@@ -230,6 +247,7 @@ function switchTab(tab) {
     referencesToolbar.style.display = 'flex';
     referencesContainer.style.display = '';
     loadReferences();
+    loadBibStatus(); // shows #bib-search-row itself when the library is ok
   } else if (tab === 'rubric') {
     rubricToolbar.style.display = 'flex';
     rubricContainer.style.display = '';
@@ -525,6 +543,150 @@ async function addBlankReference() {
       const firstInput = last.querySelector('.ref-input');
       if (firstInput) firstInput.focus();
     }
+  } catch (err) {
+    alert('Failed to add reference.');
+    console.error('Reference add error:', err);
+  }
+}
+
+// ─── Bib library (References tab) ─────────────────────────────────────────
+//
+// Status + search over the user's global .bib file (Settings → References).
+// The library lives in the main process (services/bib-library-service.js) and
+// auto-reloads when the file changes; here we just render its status and a
+// debounced search dropdown whose results one-click-add to the per-PDF
+// reference list above.
+
+let bibSearchTimer = null;
+let bibSearchSeq = 0; // discard stale async search responses
+let bibDropdownDismiss = null; // document-level outside-click listener
+
+async function loadBibStatus() {
+  const statusEl = document.getElementById('bib-status');
+  const searchRow = document.getElementById('bib-search-row');
+  try {
+    const status = await api.getBibStatus();
+    renderBibStatus(status);
+    searchRow.style.display = status.ok && currentTab === 'references' ? 'flex' : 'none';
+  } catch (err) {
+    statusEl.innerHTML = '<span class="bib-status-dot bib-status-err"></span> bib status unavailable';
+    searchRow.style.display = 'none';
+    console.error('PDF Converser sidebar error:', err);
+  }
+}
+
+function renderBibStatus(status) {
+  const statusEl = document.getElementById('bib-status');
+  statusEl.innerHTML = '';
+  if (!status.configured) {
+    const label = document.createElement('span');
+    label.textContent = 'No .bib library configured';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toolbar-btn';
+    btn.textContent = 'Configure…';
+    btn.title = 'Choose a .bib file in Settings → References';
+    btn.addEventListener('click', () => window.desktop.openSettings('references'));
+    statusEl.append(label, btn);
+    return;
+  }
+  const dot = document.createElement('span');
+  dot.className = `bib-status-dot ${status.ok ? 'bib-status-ok' : 'bib-status-err'}`;
+  const label = document.createElement('span');
+  if (status.ok) {
+    label.textContent = `${status.entry_count} references loaded`
+      + (status.skipped_count ? ` · ${status.skipped_count} skipped` : '');
+    label.title = status.path;
+  } else {
+    label.textContent = 'failed to load .bib file';
+    label.title = status.error || '';
+  }
+  statusEl.append(dot, label);
+}
+
+function hideBibDropdown() {
+  const dropdown = document.getElementById('bib-search-dropdown');
+  dropdown.hidden = true;
+  dropdown.innerHTML = '';
+  if (bibDropdownDismiss) {
+    document.removeEventListener('mousedown', bibDropdownDismiss);
+    bibDropdownDismiss = null;
+  }
+}
+
+function showBibDropdown() {
+  const dropdown = document.getElementById('bib-search-dropdown');
+  dropdown.hidden = false;
+  if (!bibDropdownDismiss) {
+    bibDropdownDismiss = (e) => {
+      if (!e.target.closest('.bib-search-wrap')) hideBibDropdown();
+    };
+    document.addEventListener('mousedown', bibDropdownDismiss);
+  }
+}
+
+async function runBibSearch() {
+  const q = document.getElementById('bib-search-input').value.trim();
+  if (!q) {
+    hideBibDropdown();
+    return;
+  }
+  const seq = ++bibSearchSeq;
+  try {
+    const data = await api.searchBib(q);
+    if (seq !== bibSearchSeq) return; // a newer search superseded this one
+    renderBibDropdown(data.results || []);
+  } catch (err) {
+    if (seq === bibSearchSeq) hideBibDropdown();
+    console.error('PDF Converser sidebar error:', err);
+  }
+}
+
+function renderBibDropdown(results) {
+  const dropdown = document.getElementById('bib-search-dropdown');
+  dropdown.innerHTML = '';
+  if (!results.length) {
+    const empty = document.createElement('div');
+    empty.className = 'bib-result-empty';
+    empty.textContent = 'No matches in library.';
+    dropdown.appendChild(empty);
+    showBibDropdown();
+    return;
+  }
+  for (const r of results) {
+    const item = document.createElement('div');
+    item.className = 'bib-result';
+    const title = document.createElement('div');
+    title.className = 'bib-result-title';
+    title.textContent = r.title || '(untitled)';
+    const meta = document.createElement('div');
+    meta.className = 'bib-result-meta';
+    meta.textContent = [r.authors, r.year, r.venue].filter(Boolean).join(' · ');
+    item.append(title, meta);
+    item.addEventListener('click', () => addBibResult(r));
+    dropdown.appendChild(item);
+  }
+  showBibDropdown();
+}
+
+async function addBibResult(r) {
+  if (!currentPdfId) {
+    alert('Open a PDF first.');
+    return;
+  }
+  try {
+    await api.createReference(currentPdfId, {
+      authors: r.authors || '',
+      title: r.title || '',
+      link: r.link || '',
+    });
+    hideBibDropdown();
+    document.getElementById('bib-search-input').value = '';
+    await loadReferences();
+    const container = document.getElementById('references-container');
+    const cards = container.querySelectorAll('.ref-card');
+    const last = cards[cards.length - 1];
+    if (last) last.scrollIntoView({ block: 'nearest' });
   } catch (err) {
     alert('Failed to add reference.');
     console.error('Reference add error:', err);

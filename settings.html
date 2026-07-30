@@ -406,6 +406,17 @@
       <input id="semantic_scholar_api_key" type="text" placeholder="(leave blank to use the shared, rate-limited pool)">
       <div class="help">Used when clicking an in-text citation to fetch its title, authors, and abstract. Lookups happen only on click and are cached per PDF. Without a key, requests use Semantic Scholar's shared pool, which is heavily rate-limited. Request a free key at <span style="color:#aaa">semanticscholar.org/product/api</span>.</div>
     </fieldset>
+
+    <fieldset>
+      <legend>Reference Library</legend>
+      <label>BibTeX file <span style="color:#666">(optional)</span></label>
+      <div class="path-row">
+        <input id="bib_file_path" type="text" readonly placeholder="(none selected)">
+        <button class="small" type="button" id="pick_bib_file">Choose…</button>
+        <button class="small secondary" type="button" id="clear_bib_file">Clear</button>
+      </div>
+      <div class="help">A .bib file searchable from the sidebar's References tab. It is re-read automatically whenever the file changes — point it at a Zotero Better BibTeX auto-export ("Keep updated") to stay in sync with your library.</div>
+    </fieldset>
     </div><!-- /references panel -->
 
     <!-- ── User Interface tab ─────────────────────────────────────────── -->
@@ -445,12 +456,27 @@
       b.addEventListener('click', () => switchTab(b.dataset.tab));
     });
 
+    // Deep-link support: a fresh open passes the target tab in the URL hash;
+    // an already-open window gets it relayed as a DOM event (see preload.js).
+    function switchTabIfValid(name) {
+      if (name && document.querySelector(`.tab-btn[data-tab="${name}"]`)) switchTab(name);
+    }
+    switchTabIfValid(location.hash.slice(1));
+    window.addEventListener('pdfc-switch-settings-tab', (e) => switchTabIfValid(e.detail));
+
     // Review tab folder/file pickers (delegate to the native dialogs in main).
     $('pick_examples_dir').addEventListener('click', async () => {
       const p = await window.desktop.selectDirectory();
       if (p) $('review_examples_dir').value = p;
     });
     $('clear_examples_dir').addEventListener('click', () => { $('review_examples_dir').value = ''; });
+
+    // References tab: BibTeX library file picker.
+    $('pick_bib_file').addEventListener('click', async () => {
+      const p = await window.desktop.selectFile([{ name: 'BibTeX', extensions: ['bib'] }]);
+      if (p) $('bib_file_path').value = p;
+    });
+    $('clear_bib_file').addEventListener('click', () => { $('bib_file_path').value = ''; });
 
     // "Style guide last generated" line under the Generate button; blank when
     // the examples have never been processed.
@@ -589,6 +615,7 @@
         openai_compat_model: $('openai_compat_model').value.trim(),
 
         semantic_scholar_api_key: $('semantic_scholar_api_key').value.trim(),
+        bib_file_path: $('bib_file_path').value.trim(),
 
         review_provider: document.querySelector('input[name=review_provider]:checked').value,
         review_openai_api_key: $('review_openai_api_key').value.trim(),
@@ -630,6 +657,7 @@
       $('openai_compat_model').value = s.openai_compat_model || '';
 
       $('semantic_scholar_api_key').value = s.semantic_scholar_api_key || '';
+      $('bib_file_path').value = s.bib_file_path || '';
 
       document.querySelector(`input[name=review_provider][value="${s.review_provider}"]`)?.click();
       $('review_openai_api_key').value = s.review_openai_api_key || '';

@@ -106,9 +106,12 @@ function writeSettingsWindowState(state) {
   } catch { /* best effort */ }
 }
 
-function openSettingsWindow() {
+function openSettingsWindow(tab) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
+    if (tab && typeof tab === 'string') {
+      settingsWindow.webContents.send('desktop:switchSettingsTab', tab);
+    }
     return;
   }
 
@@ -147,7 +150,7 @@ function openSettingsWindow() {
   });
   if (saved && saved.isMaximized) settingsWindow.maximize();
   settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadFile(SETTINGS_HTML);
+  settingsWindow.loadFile(SETTINGS_HTML, tab && typeof tab === 'string' ? { hash: tab } : undefined);
 
   // Persist the size/position the user left it at (use the un-maximized rect so
   // a maximized window restores to a sensible size next time).
@@ -253,10 +256,13 @@ async function loadPdf(absolutePath) {
 ipcMain.handle('desktop:openPdfDialog', () => openPdfDialog());
 ipcMain.handle('desktop:openPdfPath', (_e, absPath) => loadPdf(absPath));
 ipcMain.handle('desktop:getRecentFiles', () => getRecentFiles().list());
-ipcMain.handle('desktop:openSettings', () => openSettingsWindow());
+ipcMain.handle('desktop:openSettings', (_e, tab) => openSettingsWindow(tab));
 ipcMain.handle('desktop:getSettings', () => getSettingsStore().get());
 ipcMain.handle('desktop:saveSettings', async (_e, updates) => {
   const result = await getSettingsStore().save(updates || {});
+  // The bib library path may have changed — warm-reload before the broadcast
+  // so the sidebar's refreshed status is already current.
+  require('./services/bib-library-service').getBibLibrary().refresh().catch(() => {});
   // Settings live in their own window; ping the main window so the PDF pane can
   // re-render highlights (the auto-color toggle changes their colors).
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -292,8 +298,10 @@ async function pickPath(event, properties, filters) {
   return result.filePaths[0];
 }
 ipcMain.handle('desktop:selectDirectory', (e) => pickPath(e, ['openDirectory']));
-ipcMain.handle('desktop:selectFile', (e) =>
-  pickPath(e, ['openFile'], [{ name: 'Text', extensions: ['txt', 'md'] }]));
+ipcMain.handle('desktop:selectFile', (e, filters) =>
+  pickPath(e, ['openFile'], Array.isArray(filters) && filters.length
+    ? filters
+    : [{ name: 'Text', extensions: ['txt', 'md'] }]));
 
 // Native "Save As" dialog for the generated review file. Returns the chosen
 // absolute path, or '' if cancelled.
@@ -347,6 +355,9 @@ app.whenReady().then(() => {
   getSettingsStore(path.join(userData, 'settings.json'));
   getRecentFiles(path.join(userData, 'recent-files.json'));
   apiStub.initialize({ notesDir: path.join(userData, 'notes') });
+  // Warm-load the .bib reference library so the first References-tab visit
+  // gets an instant status; failures land in the library's status object.
+  require('./services/bib-library-service').getBibLibrary().refresh().catch(() => {});
   registerProtocol();
   buildMenu();
   createWindow();

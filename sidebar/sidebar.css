@@ -726,6 +726,98 @@ button.note-section-pill:hover {
   color: #c62828 !important;
 }
 
+/* === Bib library (References tab) === */
+
+.bib-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11px;
+  color: #666;
+  min-width: 0;
+}
+
+.bib-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.bib-status-ok { background: #4caf50; }
+.bib-status-err { background: #c62828; }
+
+.bib-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+#bib-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  background: #fafafa;
+}
+
+#bib-search-input:focus {
+  outline: none;
+  border-color: #4285f4;
+  background: white;
+}
+
+.bib-search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 2px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.bib-result {
+  padding: 7px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.bib-result:last-child {
+  border-bottom: none;
+}
+
+.bib-result:hover {
+  background: #eef3fd;
+}
+
+.bib-result-title {
+  font-size: 12px;
+  color: #222;
+}
+
+.bib-result-meta {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+.bib-result-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #888;
+}
+
 /* === Rubric === */
 
 .rubric-card {
