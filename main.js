@@ -358,6 +358,8 @@ app.whenReady().then(() => {
   // Warm-load the .bib reference library so the first References-tab visit
   // gets an instant status; failures land in the library's status object.
   require('./services/bib-library-service').getBibLibrary().refresh().catch(() => {});
+  // Start the bundled claude-max-api-proxy unless one is already listening.
+  require('./services/proxy-launcher').ensureProxy();
   registerProtocol();
   buildMenu();
   createWindow();
@@ -369,4 +371,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  require('./services/proxy-launcher').stopProxy();
 });

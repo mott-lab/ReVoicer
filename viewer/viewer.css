@@ -82,6 +82,42 @@ body {
   text-align: right;
 }
 
+/* Status indicator (lib/status-indicator.js) */
+.pcr-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #aaa;
+  user-select: none;
+}
+
+.pcr-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.pcr-status-ready .pcr-status-dot {
+  background: #4caf50;
+}
+
+.pcr-status-processing .pcr-status-dot {
+  background: #fbc02d;
+}
+
+.pcr-status-recording .pcr-status-dot {
+  background: #ff4444;
+  animation: pcr-status-blink 1s ease-in-out infinite;
+}
+
+@keyframes pcr-status-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
 /* Viewer container */
 #viewer-container {
   position: fixed;

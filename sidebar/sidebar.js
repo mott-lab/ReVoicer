@@ -1891,60 +1891,99 @@ const REFLECTION_MIC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill
 // onEnd/onError handlers belonging to the viewer's annotation flow.
 let reflectionCapture = null;
 
-// Wire a mic button: click starts recording (pulsing button + a temporary
-// Cancel next to it), clicking again stops. The final transcript — Whisper's
-// when available, else the live one — is passed to onFinal(text).
-function wireReflectionMic(micBtn, onFinal) {
+// Wire a mic button, mirroring the viewer's annotation recording pattern:
+// clicking the mic starts recording and replaces it with a stop button
+// (labeled "Add" by default — stops and submits) and a Cancel button
+// (discards). The final transcript — Whisper's when available, else the live
+// one — is passed to onFinal(text). While recording, the toolbar status
+// indicator shows Recording and the row's textarea/typed-Add are disabled so
+// there is only one live Add. Returns { teardown } so a host (the nudge
+// modal) can abort a live recording without leaking an indicator token.
+function wireReflectionMic(micBtn, onFinal, opts = {}) {
+  const stopLabel = opts.stopLabel || 'Add';
+  let stopBtn = null;
   let cancelBtn = null;
-  const setRecording = (on) => {
-    micBtn.classList.toggle('recording', on);
-    micBtn.title = on ? 'Stop recording' : 'Record a reflection';
-    if (on) {
-      cancelBtn = document.createElement('button');
-      cancelBtn.type = 'button';
-      cancelBtn.className = 'toolbar-btn reflection-cancel-btn';
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.addEventListener('click', () => {
-        reflectionCapture.cancel();
-        setRecording(false);
-      });
-      micBtn.after(cancelBtn);
-    } else if (cancelBtn) {
-      cancelBtn.remove();
-      cancelBtn = null;
-    }
+  let recRelease = null;
+
+  const row = micBtn.closest('.reflection-add-row');
+  const setRowDisabled = (on) => {
+    const input = row?.querySelector('.reflection-input');
+    const addBtn = row?.querySelector('.reflection-add-btn');
+    if (input) input.disabled = on;
+    if (addBtn) addBtn.disabled = on || !input?.value.trim();
+  };
+
+  const enterRecording = () => {
+    micBtn.style.display = 'none';
+    stopBtn = document.createElement('button');
+    stopBtn.type = 'button';
+    stopBtn.className = 'toolbar-btn reflection-stop-btn';
+    stopBtn.textContent = stopLabel;
+    stopBtn.title = 'Stop recording and add';
+    stopBtn.addEventListener('click', () => reflectionCapture.stop());
+    cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'toolbar-btn reflection-cancel-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.title = 'Discard the recording';
+    cancelBtn.addEventListener('click', () => {
+      reflectionCapture.cancel(); // never fires onEnd — nothing is submitted
+      exitRecording();
+    });
+    micBtn.after(stopBtn, cancelBtn);
+    setRowDisabled(true);
+    recRelease = statusIndicator.begin('recording');
+  };
+
+  const exitRecording = () => {
+    if (recRelease) { recRelease(); recRelease = null; }
+    if (stopBtn) { stopBtn.remove(); stopBtn = null; }
+    if (cancelBtn) { cancelBtn.remove(); cancelBtn = null; }
+    micBtn.style.display = '';
+    setRowDisabled(false);
   };
 
   micBtn.addEventListener('click', () => {
     if (!reflectionCapture) reflectionCapture = new SpeechCapture();
-    if (micBtn.classList.contains('recording')) {
-      reflectionCapture.stop();
-      return;
-    }
     reflectionCapture.onEnd = async (transcript, audioBlob) => {
-      setRecording(false);
-      let finalText = (transcript || '').trim();
-      const skipServer = await shouldSkipServerTranscribe();
-      if (!skipServer && audioBlob && audioBlob.size > 0) {
-        try {
-          const whisperResult = await api.transcribe(audioBlob);
-          if (whisperResult.text) finalText = whisperResult.text;
-        } catch (err) {
-          console.log('PDF Converser: Whisper unavailable for reflection, using live transcript', err.message);
+      exitRecording();
+      const release = statusIndicator.begin('processing');
+      try {
+        let finalText = (transcript || '').trim();
+        const skipServer = await shouldSkipServerTranscribe();
+        if (!skipServer && audioBlob && audioBlob.size > 0) {
+          try {
+            const whisperResult = await api.transcribe(audioBlob);
+            if (whisperResult.text) finalText = whisperResult.text;
+          } catch (err) {
+            console.log('PDF Converser: Whisper unavailable for reflection, using live transcript', err.message);
+          }
         }
+        // Awaited so any LLM cleanup inside onFinal stays under the
+        // Processing token.
+        if (finalText) await onFinal(finalText);
+        else alert('No speech detected. Try again.');
+      } finally {
+        release();
       }
-      if (finalText) onFinal(finalText);
-      else alert('No speech detected. Try again.');
     };
     reflectionCapture.onError = (error) => {
-      setRecording(false);
+      exitRecording();
       alert(error === 'not-allowed'
         ? 'Microphone permission denied. Please allow microphone access and try again.'
         : `Speech recognition error: ${error}`);
     };
-    setRecording(true);
+    enterRecording();
     reflectionCapture.start();
   });
+
+  return {
+    teardown() {
+      if (!stopBtn) return; // not recording
+      reflectionCapture.cancel();
+      exitRecording();
+    },
+  };
 }
 
 async function loadReflections() {
@@ -1971,7 +2010,7 @@ function renderReflections(reflections) {
     <div class="reflection-add-row">
       <textarea class="reflection-input" placeholder="Overall impressions, final thoughts…"></textarea>
       <button class="toolbar-btn reflection-mic-btn" title="Record a reflection">${REFLECTION_MIC_SVG}</button>
-      <button class="toolbar-btn review-primary reflection-add-btn" disabled>Add</button>
+      <button class="toolbar-btn reflection-add-btn" disabled>Add</button>
     </div>
   `;
 
@@ -2110,13 +2149,36 @@ function openReflectionEditor(card, reflection) {
 }
 
 // Saves a reflection and re-renders the list (which rebuilds the add row).
+// Only the create call can throw to callers — loadReflections() renders its
+// own error state, and a reload failure after a successful create must not
+// read as a failed add.
 async function submitReflection(text, { skipCleanup } = {}) {
-  await api.createReflection({
-    pdf_identifier: currentPdfId,
-    raw_transcript: text,
-    skip_cleanup: !!skipCleanup,
-  });
+  const release = statusIndicator.begin('processing');
+  let reflection;
+  try {
+    reflection = await api.createReflection({
+      pdf_identifier: currentPdfId,
+      raw_transcript: text,
+      skip_cleanup: !!skipCleanup,
+    });
+  } finally {
+    release();
+  }
+  surfaceReflectionPending(reflection);
   await loadReflections();
+}
+
+// A cleanup deferred because no LLM is configured is actionable, so it gets a
+// warning toast (showToast is content.js's global — same document) in
+// addition to the card's "not cleaned" badge. The offline case stays silent.
+function surfaceReflectionPending(reflection) {
+  if (reflection?.cleanup_status === 'pending' && reflection?.pending_reason === 'not_configured') {
+    showToast(
+      'Reflection saved raw — no LLM is configured for cleanup.',
+      'warning',
+      { label: 'Open Settings', onAction: () => window.desktop.openSettings() }
+    );
+  }
 }
 
 // Pre-generation nudge shown when the paper has no reflections yet. Resolves
@@ -2152,8 +2214,11 @@ function promptReflectionNudge() {
     const continueBtn = backdrop.querySelector('.reflection-continue');
     let fromVoice = false;
     let escHandler;
+    let micCtl = null;
     const done = (value) => {
-      if (reflectionCapture) reflectionCapture.cancel();
+      // teardown() aborts a live recording and releases its indicator token —
+      // a bare reflectionCapture.cancel() would leave the token held.
+      if (micCtl) micCtl.teardown();
       backdrop.remove();
       if (escHandler) document.removeEventListener('keydown', escHandler);
       resolve(value);
@@ -2161,11 +2226,11 @@ function promptReflectionNudge() {
 
     const sync = () => { continueBtn.disabled = textarea.value.trim().length === 0; };
     textarea.addEventListener('input', () => { fromVoice = false; sync(); });
-    wireReflectionMic(backdrop.querySelector('.reflection-mic-btn'), (text) => {
+    micCtl = wireReflectionMic(backdrop.querySelector('.reflection-mic-btn'), (text) => {
       textarea.value = text;
       fromVoice = true;
       sync();
-    });
+    }, { stopLabel: 'Done' });
 
     continueBtn.addEventListener('click', () => {
       const text = textarea.value.trim();
@@ -2284,6 +2349,7 @@ async function runGenerateReview() {
   }
 
   reviewGenerating = true;
+  const releaseStatus = statusIndicator.begin('processing');
   const genBtn = document.getElementById('generate-review-btn');
   if (genBtn) genBtn.disabled = true;
 
@@ -2314,6 +2380,7 @@ async function runGenerateReview() {
     }
   } finally {
     reviewGenerating = false;
+    releaseStatus();
     if (genBtn) genBtn.disabled = false;
   }
 }

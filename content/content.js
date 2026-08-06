@@ -228,15 +228,19 @@ function startRecording(selectedText) {
     if (askMode) {
       // Transcribe with Whisper for better quality, then ask. Skipped when
       // the user has chosen Vosk as the final provider — the live transcript
-      // is the final transcript.
+      // is the final transcript. Only the transcribe leg holds a processing
+      // token; submitQuestion() has its own "Thinking..." answer overlay.
       let finalQuestion = transcript.trim();
       const skipServer = await shouldSkipServerTranscribe();
       if (!skipServer && audioBlob && audioBlob.size > 0) {
+        const release = statusIndicator.begin('processing');
         try {
           const whisperResult = await apiClient.transcribe(audioBlob);
           if (whisperResult.text) finalQuestion = whisperResult.text;
         } catch (err) {
           console.log('PDF Converser: Whisper unavailable for Q&A, using Web Speech API', err.message);
+        } finally {
+          release();
         }
       }
       if (finalQuestion) {
@@ -263,7 +267,12 @@ function startRecording(selectedText) {
 
 // === Recording UI ===
 
+// Toolbar-indicator token held while the recording overlay is up. Released in
+// hideRecordingUI(), which every exit path (Done/Ask/Cancel/onError) runs.
+let recordingRelease = null;
+
 function showRecordingUI(selectedText) {
+  recordingRelease = statusIndicator.begin('recording');
   recordingOverlay = document.createElement('div');
   recordingOverlay.id = 'pdf-converser-recording';
 
@@ -313,6 +322,10 @@ function clearSelectionForSubmit() {
 }
 
 function hideRecordingUI() {
+  if (recordingRelease) {
+    recordingRelease();
+    recordingRelease = null;
+  }
   if (recordingOverlay) {
     recordingOverlay.remove();
     recordingOverlay = null;
@@ -531,96 +544,87 @@ function captureHighlightData() {
 
 // === Note Submission ===
 
-// Success toast for a saved note. Pending notes carry a placeholder type, so
-// no type label is shown; the wording depends on why cleanup was deferred
-// (offline mode vs. no LLM configured — api-stub sets `pending_reason`).
-function showNoteSavedToast(note) {
-  const typeLabel = (note.comment_type || 'summary').replace('_', ' ');
-  const preview = note.cleaned_comment.length > 70
-    ? note.cleaned_comment.substring(0, 70) + '...'
-    : note.cleaned_comment;
-  if (note.cleanup_status === 'pending') {
-    if (note.pending_reason === 'not_configured') {
-      showToast(
-        'Saved — pending cleanup. No LLM is configured; add an API key in Settings, then use Clean pending in the sidebar.',
-        'warning',
-        { label: 'Open Settings', onAction: () => window.desktop.openSettings() }
-      );
-    } else {
-      showToast(`Saved offline — pending cleanup: ${preview}`, 'success');
-    }
-  } else {
-    showToast(`[${typeLabel}] ${preview}`, 'success');
+// Saved notes no longer get a success toast — the toolbar status indicator
+// covers the normal flow. The one exception is cleanup deferred because no
+// LLM is configured, which is actionable and so keeps its warning toast.
+function maybeToastPendingCleanup(note) {
+  if (note.cleanup_status === 'pending' && note.pending_reason === 'not_configured') {
+    showToast(
+      'Saved — pending cleanup. No LLM is configured; add an API key in Settings, then use Clean pending in the sidebar.',
+      'warning',
+      { label: 'Open Settings', onAction: () => window.desktop.openSettings() }
+    );
   }
 }
 
 async function submitNote(selectedText, rawTranscript, audioBlob) {
-  const pdfId = getPdfIdentifier();
-  const pageNum = getCurrentPageNumber(currentSelectionRange);
-  const pdfTitle = getPdfTitle();
-  const highlightData = captureHighlightData();
-
-  // If we have audio, try Whisper transcription first for better quality.
-  // Skipped when the user has chosen Vosk as the final provider — the live
-  // transcript is already the final transcript.
-  let finalTranscript = rawTranscript;
-  const skipServer = await shouldSkipServerTranscribe();
-  if (!skipServer && audioBlob && audioBlob.size > 0) {
-    showToast('Transcribing with Whisper...', 'info');
-    try {
-      const whisperResult = await apiClient.transcribe(audioBlob);
-      if (whisperResult.text) {
-        finalTranscript = whisperResult.text;
-      }
-    } catch (err) {
-      // Whisper failed (not configured, or API error) — fall back to Web Speech API transcript
-      console.log('PDF Converser: Whisper unavailable, using Web Speech API transcript', err.message);
-    }
-  }
-
-  if (!finalTranscript) {
-    showToast('No speech detected. Try again.', 'error');
-    return;
-  }
-
-  showToast('Processing annotation...', 'info');
-
+  const release = statusIndicator.begin('processing');
   try {
-    const note = await apiClient.createNote({
-      pdf_identifier: pdfId,
-      pdf_title: pdfTitle,
-      selected_text: selectedText,
-      page_number: pageNum,
-      raw_transcript: finalTranscript,
-      highlight_data: highlightData,
-    });
+    const pdfId = getPdfIdentifier();
+    const pageNum = getCurrentPageNumber(currentSelectionRange);
+    const pdfTitle = getPdfTitle();
+    const highlightData = captureHighlightData();
 
-    showNoteSavedToast(note);
+    // If we have audio, try Whisper transcription first for better quality.
+    // Skipped when the user has chosen Vosk as the final provider — the live
+    // transcript is already the final transcript.
+    let finalTranscript = rawTranscript;
+    const skipServer = await shouldSkipServerTranscribe();
+    if (!skipServer && audioBlob && audioBlob.size > 0) {
+      try {
+        const whisperResult = await apiClient.transcribe(audioBlob);
+        if (whisperResult.text) {
+          finalTranscript = whisperResult.text;
+        }
+      } catch (err) {
+        // Whisper failed (not configured, or API error) — fall back to Web Speech API transcript
+        console.log('PDF Converser: Whisper unavailable, using Web Speech API transcript', err.message);
+      }
+    }
 
-    // Add to cache and render highlight immediately
-    cachedNotes.push(note);
-    if (note.highlight_data) renderNoteHighlight(note);
+    if (!finalTranscript) {
+      showToast('No speech detected. Try again.', 'error');
+      return;
+    }
 
-    // Notify sidebar to refresh
-    chrome.runtime.sendMessage({
-      action: 'noteCreated',
-      pdfIdentifier: pdfId,
-    }).catch(() => {});
-  } catch (err) {
-    console.error('PDF Converser - submission error:', err);
-    showApiErrorToast(err, 'Saving the annotation');
+    try {
+      const note = await apiClient.createNote({
+        pdf_identifier: pdfId,
+        pdf_title: pdfTitle,
+        selected_text: selectedText,
+        page_number: pageNum,
+        raw_transcript: finalTranscript,
+        highlight_data: highlightData,
+      });
+
+      maybeToastPendingCleanup(note);
+
+      // Add to cache and render highlight immediately
+      cachedNotes.push(note);
+      if (note.highlight_data) renderNoteHighlight(note);
+
+      // Notify sidebar to refresh
+      chrome.runtime.sendMessage({
+        action: 'noteCreated',
+        pdfIdentifier: pdfId,
+      }).catch(() => {});
+    } catch (err) {
+      console.error('PDF Converser - submission error:', err);
+      showApiErrorToast(err, 'Saving the annotation');
+    }
+  } finally {
+    release();
   }
 }
 
 async function submitTypedNote(selectedText, typedText, skipCleanup) {
-  const pdfId = getPdfIdentifier();
-  const pageNum = getCurrentPageNumber(currentSelectionRange);
-  const pdfTitle = getPdfTitle();
-  const highlightData = captureHighlightData();
-
-  showToast('Processing annotation...', 'info');
-
+  const release = statusIndicator.begin('processing');
   try {
+    const pdfId = getPdfIdentifier();
+    const pageNum = getCurrentPageNumber(currentSelectionRange);
+    const pdfTitle = getPdfTitle();
+    const highlightData = captureHighlightData();
+
     const note = await apiClient.createNote({
       pdf_identifier: pdfId,
       pdf_title: pdfTitle,
@@ -631,7 +635,7 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
       highlight_data: highlightData,
     });
 
-    showNoteSavedToast(note);
+    maybeToastPendingCleanup(note);
 
     cachedNotes.push(note);
     if (note.highlight_data) renderNoteHighlight(note);
@@ -643,6 +647,8 @@ async function submitTypedNote(selectedText, typedText, skipCleanup) {
   } catch (err) {
     console.error('PDF Converser - submission error:', err);
     showApiErrorToast(err, 'Saving the annotation');
+  } finally {
+    release();
   }
 }
 

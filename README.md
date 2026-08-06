@@ -35,14 +35,19 @@ needed.
 ## Run
 
 ```
+git clone --recurse-submodules <repo-url>
+cd pdf-converser
 npm install
 npm start
 ```
 
 `npm install` triggers a `postinstall` step that downloads the ~40 MB Vosk
-speech model into `models/` so live transcription works offline. If the
-download fails, install continues and you can retry with
-`npm run fetch-vosk-model`.
+speech model into `models/` so live transcription works offline, and
+checks out and builds the bundled `claude-max-api-proxy` submodule (see
+[Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy)).
+Both steps recover from a plain `git clone` without `--recurse-submodules`,
+and failures don't block the install — retry with `npm run fetch-vosk-model`
+or `npm run proxy:build`.
 
 Then `File → Open PDF…` (`Ctrl+O`) or drag a PDF onto the window.
 `File → Open Recent` lists recently opened files.
@@ -63,6 +68,24 @@ generation — needs a configured model provider. Open
 - **OpenAI-compatible** — a base URL and model name for Groq, OpenRouter,
   Together, LM Studio, vLLM, llama.cpp server, etc. (key optional,
   depending on the endpoint)
+
+### Claude subscription via bundled proxy
+
+A Claude Pro/Max subscription can power all LLM features without an API
+key, through the vendored
+[claude-max-api-proxy](vendor/claude-max-api-proxy) submodule (an
+OpenAI-compatible server wrapping the Claude Code CLI). The app starts it
+automatically on launch when nothing is listening on port 3456, and stops
+it again on quit; a proxy already running (e.g. started manually) is
+detected and left alone.
+
+Requirements: the [Claude Code CLI](https://claude.com/claude-code)
+installed and logged in (`claude` on your PATH). Then in Settings pick
+**OpenAI-compatible** with:
+
+- Base URL: `http://localhost:3456/v1`
+- Model: `claude-sonnet` (or `claude-opus`, `claude-haiku`)
+- API key: any non-empty value (the proxy ignores it)
 
 Use the **Test** button next to the provider to confirm the credentials
 work; it also lists the available models. Keys are stored locally in

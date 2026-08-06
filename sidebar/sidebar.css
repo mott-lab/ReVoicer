@@ -1130,7 +1130,8 @@ button.note-section-pill:hover {
   border-color: #4285f4;
 }
 
-.reflection-mic-btn.recording {
+/* Stop button shown in place of the mic while recording — stops and adds. */
+.reflection-stop-btn {
   background: #fdecea;
   border-color: #c62828;
   color: #c62828;
