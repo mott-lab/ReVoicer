@@ -1,0 +1,3 @@
+[submodule "vendor/claude-max-api-proxy"]
+	path = vendor/claude-max-api-proxy
+	url = c:/Users/SREAL/mattg/wares/agentic-wares/claude-max-api-proxy
