@@ -2051,6 +2051,27 @@ function renderReflections(reflections) {
     editBtn.title = 'Edit reflection text';
     editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', () => openReflectionEditor(card, r));
+    const cleanBtn = document.createElement('button');
+    cleanBtn.type = 'button';
+    cleanBtn.className = 'note-reclean';
+    const cleanLabel = r.cleanup_status === 'pending' ? 'Clean' : 'Re-clean';
+    cleanBtn.textContent = cleanLabel;
+    cleanBtn.title = 'Clean up this reflection with the LLM (from the raw transcript)';
+    cleanBtn.addEventListener('click', async () => {
+      cleanBtn.textContent = 'Cleaning…';
+      cleanBtn.disabled = true;
+      const release = statusIndicator.begin('processing');
+      try {
+        await api.recleanReflection(r.id, currentPdfId);
+        await loadReflections();
+      } catch (err) {
+        cleanBtn.textContent = cleanLabel;
+        cleanBtn.disabled = false;
+        alert(describeApiError(err, 'Cleaning the reflection').text);
+      } finally {
+        release();
+      }
+    });
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'note-delete';
@@ -2065,7 +2086,7 @@ function renderReflections(reflections) {
         alert(`Failed to delete the reflection: ${err?.message || err}`);
       }
     });
-    actions.append(editBtn, delBtn);
+    actions.append(editBtn, cleanBtn, delBtn);
 
     card.append(textEl, raw, meta, actions);
     list.appendChild(card);
@@ -2082,8 +2103,7 @@ function renderReflections(reflections) {
     addBtn.disabled = true;
     addBtn.textContent = 'Adding…';
     try {
-      // Typed text is stored verbatim; only voice transcripts get LLM cleanup.
-      await submitReflection(text, { skipCleanup: true });
+      await submitReflection(text, { skipCleanup: false });
     } catch (err) {
       addBtn.disabled = false;
       addBtn.textContent = 'Add';
@@ -2182,10 +2202,8 @@ function surfaceReflectionPending(reflection) {
 }
 
 // Pre-generation nudge shown when the paper has no reflections yet. Resolves
-// 'skip' (generate without one), { text, fromVoice } (save it, then
-// generate), or null (cancel — don't generate). fromVoice tracks whether the
-// textarea content came from the mic so the transcript still gets LLM-cleaned
-// unless the user edited it.
+// 'skip' (generate without one), { text } (save it, then generate), or null
+// (cancel — don't generate).
 function promptReflectionNudge() {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
@@ -2212,7 +2230,6 @@ function promptReflectionNudge() {
 
     const textarea = backdrop.querySelector('.reflection-input');
     const continueBtn = backdrop.querySelector('.reflection-continue');
-    let fromVoice = false;
     let escHandler;
     let micCtl = null;
     const done = (value) => {
@@ -2225,16 +2242,15 @@ function promptReflectionNudge() {
     };
 
     const sync = () => { continueBtn.disabled = textarea.value.trim().length === 0; };
-    textarea.addEventListener('input', () => { fromVoice = false; sync(); });
+    textarea.addEventListener('input', sync);
     micCtl = wireReflectionMic(backdrop.querySelector('.reflection-mic-btn'), (text) => {
       textarea.value = text;
-      fromVoice = true;
       sync();
     }, { stopLabel: 'Done' });
 
     continueBtn.addEventListener('click', () => {
       const text = textarea.value.trim();
-      if (text) done({ text, fromVoice });
+      if (text) done({ text });
     });
     backdrop.querySelector('.reflection-skip').addEventListener('click', () => done('skip'));
     backdrop.querySelector('.review-modal-close').addEventListener('click', () => done(null));
@@ -2341,7 +2357,7 @@ async function runGenerateReview() {
   if (nudgeChoice === null) return; // modal cancelled — don't generate
   if (nudgeChoice !== 'skip') {
     try {
-      await submitReflection(nudgeChoice.text, { skipCleanup: !nudgeChoice.fromVoice });
+      await submitReflection(nudgeChoice.text, { skipCleanup: false });
     } catch (err) {
       alert(`Failed to save the reflection: ${err?.message || err}`);
       return;

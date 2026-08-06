@@ -1,9 +1,12 @@
 // Renderer-side Whisper runtime.
 //
-// Lazy-loads @huggingface/transformers from jsdelivr on first transcribe()
-// call (so app startup pays nothing), runs the model in the page's WASM
-// (or WebGPU when available) sandbox, and caches the model files in browser
-// storage under the pdfc:// origin so subsequent runs are instant.
+// Audio decoding/resampling happens here (OfflineAudioContext is unavailable
+// in workers), but model loading and inference run in a Web Worker
+// (local-whisper-worker.js) so the main thread — and PDF scrolling — never
+// block during transcription. The worker lazy-loads
+// @huggingface/transformers from jsdelivr on first use and caches model
+// files in browser storage under the pdfc:// origin, so subsequent runs are
+// instant and work offline.
 //
 // We deliberately avoid bundling: no build step, no node_modules size hit.
 // Model files come from huggingface.co (CORS-friendly), runtime from jsdelivr.
@@ -16,10 +19,12 @@
 // `pdfc-whisper-progress` so preload.js can render a toast without coupling
 // to this module.
 
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/+esm';
 const MODEL_ID = 'Xenova/whisper-tiny.en';
+const WORKER_URL = 'services/local-whisper-worker.js';
 
-let _pipelinePromise = null;
+let _workerPromise = null;
+let _nextId = 1;
+const _pending = new Map(); // id → { resolve, reject }
 
 function emit(stage, payload) {
   window.dispatchEvent(new CustomEvent('pdfc-whisper-progress', {
@@ -27,27 +32,44 @@ function emit(stage, payload) {
   }));
 }
 
-async function getPipeline() {
-  if (_pipelinePromise) return _pipelinePromise;
-  _pipelinePromise = (async () => {
-    emit('loading-runtime', {});
-    const { pipeline, env } = await import(TRANSFORMERS_CDN);
-    // We don't ship local model files — let the lib pull from HF Hub.
-    env.allowLocalModels = false;
-    emit('loading-model', { model: MODEL_ID });
-    const transcriber = await pipeline('automatic-speech-recognition', MODEL_ID, {
-      progress_callback: (p) => {
-        // p shape: { status, name, file, progress, loaded, total }
-        emit('model-progress', p);
-      },
-    });
-    emit('ready', {});
-    return transcriber;
+// The worker is created from a Blob URL rather than the pdfc:// URL directly:
+// blob workers inherit the page origin, which sidesteps custom-protocol
+// worker-loading restrictions while keeping Cache API storage shared.
+async function getWorker() {
+  if (_workerPromise) return _workerPromise;
+  _workerPromise = (async () => {
+    const src = await (await fetch(WORKER_URL)).text();
+    const worker = new Worker(
+      URL.createObjectURL(new Blob([src], { type: 'text/javascript' })),
+      { type: 'module' },
+    );
+    worker.onmessage = (e) => {
+      const msg = e.data || {};
+      if (msg.kind === 'progress') {
+        const { kind, ...detail } = msg;
+        emit(detail.stage, detail);
+        return;
+      }
+      const entry = _pending.get(msg.id);
+      if (!entry) return;
+      _pending.delete(msg.id);
+      if (msg.kind === 'result') entry.resolve({ text: msg.text });
+      else entry.reject(new Error(msg.message || 'Whisper worker error'));
+    };
+    worker.onerror = (err) => {
+      // Fatal worker failure (e.g. script load) — fail all in-flight requests
+      // and let the next transcribe() spin up a fresh worker.
+      for (const entry of _pending.values()) {
+        entry.reject(new Error(err?.message || 'Whisper worker crashed'));
+      }
+      _pending.clear();
+      worker.terminate();
+      _workerPromise = null;
+    };
+    return worker;
   })();
-  // If the load fails we want the next call to retry, not stay stuck on a
-  // rejected promise.
-  _pipelinePromise.catch(() => { _pipelinePromise = null; });
-  return _pipelinePromise;
+  _workerPromise.catch(() => { _workerPromise = null; });
+  return _workerPromise;
 }
 
 // Decode an audio Blob (webm/opus from MediaRecorder, etc.) into a 16kHz
@@ -89,28 +111,25 @@ async function decodeTo16kMono(blob) {
 }
 
 async function transcribe(blob) {
-  const transcriber = await getPipeline();
+  const worker = await getWorker();
   emit('decoding', {});
   const samples = await decodeTo16kMono(blob);
-  emit('inferring', { samples: samples.length });
-  // Whisper's encoder has a hard 30-second context window. Without these
-  // parameters, transformers.js silently truncates the input — anything past
-  // 30 s gets dropped from the transcript. chunk_length_s splits the audio
-  // into 30 s windows; stride_length_s adds overlap so words on chunk
-  // boundaries don't get clipped.
-  const result = await transcriber(samples, {
-    chunk_length_s: 30,
-    stride_length_s: 5,
+  const id = _nextId++;
+  const done = new Promise((resolve, reject) => {
+    _pending.set(id, { resolve, reject });
   });
-  emit('done', {});
-  return { text: (result?.text || '').trim() };
+  // Transfer the buffer — no copy of potentially minutes of audio.
+  worker.postMessage({ id, samples }, [samples.buffer]);
+  return done;
 }
 
 // Heuristic pre-check: has transformers.js already cached the model weights?
 // transformers.js v3 stores downloaded files in the Cache API under
-// 'transformers-cache'. Only a pre-check — the try/catch around transcribe()
-// in preload.js remains the real safety net (e.g. cached weights but an
-// uncached jsdelivr runtime import would still fail while truly offline).
+// 'transformers-cache' (written by the worker; blob workers share the page
+// origin, so it's visible here). Only a pre-check — the try/catch around
+// transcribe() in preload.js remains the real safety net (e.g. cached weights
+// but an uncached jsdelivr runtime import would still fail while truly
+// offline).
 async function isModelCached() {
   try {
     if (!('caches' in window)) return false;

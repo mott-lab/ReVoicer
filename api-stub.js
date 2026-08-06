@@ -293,10 +293,11 @@ const routes = {
       return { __status: 400, error: 'raw_transcript is required' };
     }
     const { cleanup_enabled, offline_mode } = getSettingsStore().get();
-    // Typed reflections (skip_cleanup) and cleanup-disabled installs never
-    // touch the LLM. Voice reflections that can't be cleaned right now are
-    // saved raw and marked pending — unlike notes there is no re-clean queue;
-    // review generation sends the raw transcript too, so nothing is lost.
+    // skip_cleanup requests and cleanup-disabled installs never touch the
+    // LLM. Reflections that can't be cleaned right now are saved raw and
+    // marked pending — the per-card Clean button (reclean route below) can
+    // process them later, and review generation sends the raw transcript
+    // too, so nothing is lost either way.
     if (body.skip_cleanup || !cleanup_enabled) {
       return getReflectionStore().createReflection({
         contentHash: body.pdf_identifier,
@@ -322,6 +323,30 @@ const routes = {
       cleanedText: text,
       cleanupStatus: 'done',
     });
+  },
+
+  // Explicit per-card Clean/Re-clean. Like the notes reclean route, this is a
+  // deliberate user action, so only offline mode blocks it (a missing API key
+  // surfaces as the LLM call's own error).
+  'PUT /api/reflections/:id/reclean': async ({ params, query }) => {
+    if (getSettingsStore().get().offline_mode) {
+      return {
+        __status: 503,
+        error: 'Offline mode is on — turn it off in Settings to clean reflections.',
+        code: 'OFFLINE',
+      };
+    }
+    const store = getReflectionStore();
+    const reflections = await store.listReflections(query.pdf_identifier);
+    const reflection = reflections.find((r) => r.id === params.id);
+    if (!reflection) return { __status: 404, error: 'Reflection not found' };
+    const { text } = await cleanupReflection(reflection.raw_transcript || '');
+    const updated = await store.updateReflection(query.pdf_identifier, params.id, {
+      cleaned_text: text,
+      cleanup_status: 'done',
+    });
+    if (!updated) return { __status: 404, error: 'Reflection not found' };
+    return updated;
   },
 
   'PUT /api/reflections/:id': async ({ params, query, body }) => {
