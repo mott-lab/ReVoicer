@@ -220,6 +220,10 @@ async function ensureProxy({ timeoutMs = 20000 } = {}) {
         // Without this the proxy discards the CLI's stderr, leaving every
         // failure as a bare exit code.
         DEBUG_SUBPROCESS: '1',
+        // Drop the proxy's OpenClaw tool-mapping system prompt — ~40 lines of
+        // instructions about tools that don't exist here, appended to every
+        // request otherwise.
+        NO_OPENCLAW_PROMPT: '1',
       },
       cwd: proxyCwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
