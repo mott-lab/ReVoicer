@@ -21,6 +21,8 @@ let pageDivs = [];
 let renderGeneration = 0;
 let activeRenderTask = null;
 let textExtractedFired = false;
+let pageTextContents = [];
+let pageAnnotations = [];
 
 // Get the PDF URL from query params
 const params = new URLSearchParams(window.location.search);
@@ -81,6 +83,8 @@ async function loadPdf(url) {
     }
     renderGeneration++;
     textExtractedFired = false;
+    pageTextContents = [];
+    pageAnnotations = [];
     for (const k of Object.keys(pageTexts)) delete pageTexts[k];
 
     // Pre-fetch every PDFPageProxy. pdf.js caches page objects internally, so
@@ -109,7 +113,6 @@ async function loadPdf(url) {
       return pageDiv;
     });
     for (const div of pageDivs) pagesContainer.appendChild(div);
-
     // Initial render at the current scale, then fit-to-width (which triggers
     // its own rerender — the generation guard handles the overlap cleanly).
     await rerender();
@@ -247,12 +250,17 @@ async function rerender() {
     div.style.width = `${vp.width}px`;
     div.style.height = `${vp.height}px`;
     const canvas = div.querySelector('canvas');
-    canvas.width = Math.floor(vp.width * dpr);
-    canvas.height = Math.floor(vp.height * dpr);
+    // Keep old bitmap visible while new scale renders. Resizing canvas here would
+    // clear it immediately, producing a white flash on every zoom.
     canvas.style.width = `${Math.floor(vp.width)}px`;
     canvas.style.height = `${Math.floor(vp.height)}px`;
-    div.querySelector('.text-layer').innerHTML = '';
-    div.querySelector('.annotation-layer').innerHTML = '';
+
+    // Hide old interaction geometry while page renders at new scale. Keeping
+    // stale layers visible makes text, links, and highlights drift apart.
+    div.querySelector('.text-layer').style.visibility = 'hidden';
+    div.querySelector('.annotation-layer').style.visibility = 'hidden';
+    const highlightLayer = div.querySelector('.pcr-highlight-layer');
+    if (highlightLayer) highlightLayer.style.visibility = 'hidden';
   }
 
   // Page-by-page render. We bail after every await if a newer zoom kicked
@@ -263,7 +271,12 @@ async function rerender() {
     const div = pageDivs[i];
     const viewport = page.getViewport({ scale: currentScale });
     const canvas = div.querySelector('canvas');
-    const ctx = canvas.getContext('2d');
+    // Render offscreen. Visible canvas is replaced only after pdf.js completes,
+    // keeping previous scale visible during expensive rasterization.
+    const renderCanvas = document.createElement('canvas');
+    renderCanvas.width = Math.floor(viewport.width * dpr);
+    renderCanvas.height = Math.floor(viewport.height * dpr);
+    const ctx = renderCanvas.getContext('2d');
 
     // Match the DPR-multiplied canvas: pdf.js draws into a buffer that's
     // `dpr` times larger than the viewport, then the browser downsamples to
@@ -274,6 +287,10 @@ async function rerender() {
     activeRenderTask = task;
     try {
       await task.promise;
+      if (myGen !== renderGeneration) return;
+      canvas.width = renderCanvas.width;
+      canvas.height = renderCanvas.height;
+      canvas.getContext('2d').drawImage(renderCanvas, 0, 0);
     } catch (err) {
       // pdf.js throws RenderingCancelledException when cancel() is called;
       // that's expected when a newer zoom raced this one.
@@ -284,16 +301,30 @@ async function rerender() {
     }
     if (myGen !== renderGeneration) return;
 
-    const textContent = await page.getTextContent();
+    let textContent = pageTextContents[i];
+    if (!textContent) {
+      textContent = await page.getTextContent();
+      pageTextContents[i] = textContent;
+      pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
+    }
     if (myGen !== renderGeneration) return;
     const textLayerDiv = div.querySelector('.text-layer');
     textLayerDiv.innerHTML = '';
     renderTextLayer(textContent, textLayerDiv, viewport);
-    pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
 
-    const annotations = await page.getAnnotations();
+    let annotations = pageAnnotations[i];
+    if (!annotations) {
+      annotations = await page.getAnnotations();
+      pageAnnotations[i] = annotations;
+    }
     if (myGen !== renderGeneration) return;
-    renderAnnotationLayer(annotations, div.querySelector('.annotation-layer'), viewport);
+    const annotationLayer = div.querySelector('.annotation-layer');
+    annotationLayer.innerHTML = '';
+    renderAnnotationLayer(annotations, annotationLayer, viewport);
+    textLayerDiv.style.visibility = 'visible';
+    annotationLayer.style.visibility = 'visible';
+    const highlightLayer = div.querySelector('.pcr-highlight-layer');
+    if (highlightLayer) highlightLayer.style.visibility = 'visible';
 
     document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
   }
@@ -321,23 +352,57 @@ function fitToWidth() {
 }
 
 // Toolbar controls
-document.getElementById('zoom-in').addEventListener('click', () => {
-  if (currentScale < MAX_SCALE) {
-    currentScale = Math.min(currentScale + SCALE_STEP, MAX_SCALE);
-    document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
-    rerender();
+function setZoom(nextScale, anchor) {
+  const container = document.getElementById('viewer-container');
+  const oldScale = currentScale;
+  currentScale = Math.max(MIN_SCALE, Math.min(nextScale, MAX_SCALE));
+  if (currentScale === oldScale) return;
+
+  document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
+  rerender();
+
+  // Pages are centered inside #pages, so scrollLeft is not a direct PDF
+  // coordinate. Re-find the same page after its synchronous resize and move
+  // scroll offsets by the point's actual viewport displacement.
+  if (anchor) {
+    const page = pageDivs[anchor.pageIndex];
+    if (!page) return;
+    const rect = page.getBoundingClientRect();
+    const pointX = rect.left + rect.width * anchor.xRatio;
+    const pointY = rect.top + rect.height * anchor.yRatio;
+    container.scrollLeft += pointX - anchor.clientX;
+    container.scrollTop += pointY - anchor.clientY;
   }
+}
+
+document.getElementById('zoom-in').addEventListener('click', () => {
+  setZoom(currentScale + SCALE_STEP);
 });
 
 document.getElementById('zoom-out').addEventListener('click', () => {
-  if (currentScale > MIN_SCALE) {
-    currentScale = Math.max(currentScale - SCALE_STEP, MIN_SCALE);
-    document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
-    rerender();
-  }
+  setZoom(currentScale - SCALE_STEP);
 });
 
 document.getElementById('zoom-fit').addEventListener('click', fitToWidth);
+
+// Ctrl/Cmd + wheel zooms the PDF instead of scrolling it. Browser/Electron
+// reports the modifier as ctrlKey on Windows/Linux and metaKey on macOS.
+document.getElementById('viewer-container').addEventListener('wheel', (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+
+  event.preventDefault();
+  const page = event.target.closest?.('.pdf-page');
+  const pageRect = page?.getBoundingClientRect();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  const anchor = page ? {
+    pageIndex: Number(page.dataset.pageNumber) - 1,
+    xRatio: (event.clientX - pageRect.left) / pageRect.width,
+    yRatio: (event.clientY - pageRect.top) / pageRect.height,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  } : null;
+  setZoom(currentScale + direction * SCALE_STEP, anchor);
+}, { passive: false });
 
 document.getElementById('prev-page').addEventListener('click', () => {
   const input = document.getElementById('page-input');
