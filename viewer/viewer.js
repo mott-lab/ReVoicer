@@ -267,10 +267,15 @@ async function rerender() {
     const layerScale = currentScale / previousScale;
     const textLayer = div.querySelector('.text-layer');
     const annotationLayer = div.querySelector('.annotation-layer');
+    const highlightLayer = div.querySelector('.pcr-highlight-layer');
     textLayer.style.transformOrigin = '0 0';
     annotationLayer.style.transformOrigin = '0 0';
     textLayer.style.transform = `scale(${layerScale})`;
     annotationLayer.style.transform = `scale(${layerScale})`;
+    if (highlightLayer) {
+      highlightLayer.style.transformOrigin = '0 0';
+      highlightLayer.style.transform = `scale(${layerScale})`;
+    }
   }
 
   // Page-by-page render. We bail after every await if a newer zoom kicked
@@ -333,6 +338,8 @@ async function rerender() {
     renderAnnotationLayer(annotations, annotationLayer, viewport);
     textLayerDiv.style.transform = '';
     annotationLayer.style.transform = '';
+    const highlightLayer = div.querySelector('.pcr-highlight-layer');
+    if (highlightLayer) highlightLayer.style.transform = '';
     pageDisplayScales[i] = currentScale;
 
     document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
