@@ -54,6 +54,15 @@ const DEFAULTS = {
   openai_compat_api_key: '',
   openai_compat_model: '',
 
+  // Opt-in to the vendored claude-max-api-proxy (an OpenAI-compatible server
+  // wrapping the Claude Code CLI). Off by default: the proxy is only built and
+  // started for users who tick the box in Settings and pass its setup check,
+  // so anyone without the Claude CLI never touches it. See
+  // services/proxy-launcher.js.
+  use_bundled_claude_proxy: false,
+  review_use_bundled_claude_proxy: false,
+  bundled_proxy_verified_at: '',     // ISO stamp of the last passing setup check
+
   // Optional Semantic Scholar API key for in-text citation lookups. Empty is
   // fine — the keyless pool works at low volume, a key just raises rate limits.
   semantic_scholar_api_key: '',

@@ -6,9 +6,9 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "proxy:build": "cd vendor/claude-max-api-proxy && npm install && npm run build",
+    "proxy:build": "node scripts/setup-proxy.js --force",
     "fetch-vosk-model": "node scripts/download-vosk-model.js",
-    "postinstall": "node scripts/download-vosk-model.js && node scripts/setup-proxy.js"
+    "postinstall": "node scripts/download-vosk-model.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",

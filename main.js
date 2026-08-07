@@ -263,6 +263,9 @@ ipcMain.handle('desktop:saveSettings', async (_e, updates) => {
   // The bib library path may have changed — warm-reload before the broadcast
   // so the sidebar's refreshed status is already current.
   require('./services/bib-library-service').getBibLibrary().refresh().catch(() => {});
+  // Ticking/unticking the bundled-proxy box (or toggling offline mode) takes
+  // effect immediately rather than at the next launch.
+  reconcileProxy();
   // Settings live in their own window; ping the main window so the PDF pane can
   // re-render highlights (the auto-color toggle changes their colors).
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -270,6 +273,72 @@ ipcMain.handle('desktop:saveSettings', async (_e, updates) => {
   }
   return result;
 });
+// Start or stop the bundled proxy to match the current settings. Called at
+// startup and after every save, so ticking/unticking the box takes effect
+// without a restart.
+function reconcileProxy() {
+  const launcher = require('./services/proxy-launcher');
+  const s = getSettingsStore().get();
+  const wanted = !s.offline_mode
+    && (s.use_bundled_claude_proxy || s.review_use_bundled_claude_proxy);
+  if (!wanted) {
+    launcher.stopProxy();
+    return;
+  }
+  launcher.ensureProxy().then((r) => {
+    if (!r.ok) console.warn(`[proxy] not started (${r.code}): ${r.message}`);
+  });
+}
+
+// Full opt-in setup for the bundled proxy, driven by the Settings button.
+// Streams per-step progress to the calling window; resolves with a result
+// object (never rejects — Electron strips custom error props across invoke).
+ipcMain.handle('desktop:setupClaudeProxy', async (e, provider, model) => {
+  const launcher = require('./services/proxy-launcher');
+  try {
+    const result = await launcher.setupAndTest({
+      model,
+      onProgress: (step) => {
+        if (!e.sender.isDestroyed()) {
+          e.sender.send('desktop:proxySetupProgress', { provider, step });
+        }
+      },
+    });
+    // Persist on success so a passing check can't be lost by closing Settings
+    // without saving — which would silently leave the proxy disabled at the
+    // next launch.
+    if (result.ok) {
+      // The button is only reachable while that tab's OpenAI-compat block is
+      // showing, so the provider selection is implied — persist it too, or
+      // "Saved." would be a half-truth and the proxy would sit unused.
+      const isReview = provider === 'review_openai_compat';
+      await getSettingsStore().save(isReview
+        ? {
+          review_provider: 'openai_compat',
+          review_use_bundled_claude_proxy: true,
+          review_openai_compat_base_url: result.baseUrl,
+          review_openai_compat_model: result.model,
+          bundled_proxy_verified_at: new Date().toISOString(),
+        }
+        : {
+          text_provider: 'openai_compat',
+          use_bundled_claude_proxy: true,
+          openai_compat_base_url: result.baseUrl,
+          openai_compat_model: result.model,
+          bundled_proxy_verified_at: new Date().toISOString(),
+        });
+    }
+    return result;
+  } catch (err) {
+    return { ok: false, code: 'INTERNAL', message: err?.message || String(err), steps: [] };
+  }
+});
+
+ipcMain.handle('desktop:claudeProxyStatus', async () => {
+  const launcher = require('./services/proxy-launcher');
+  return { ...launcher.status(), probe: await launcher.probe() };
+});
+
 ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
   const { testConnection } = require('./services/llm-service');
   return testConnection(provider, params || {});
@@ -358,8 +427,11 @@ app.whenReady().then(() => {
   // Warm-load the .bib reference library so the first References-tab visit
   // gets an instant status; failures land in the library's status object.
   require('./services/bib-library-service').getBibLibrary().refresh().catch(() => {});
-  // Start the bundled claude-max-api-proxy unless one is already listening.
-  require('./services/proxy-launcher').ensureProxy();
+  // The bundled Claude Code proxy is opt-in: start it only when the user has
+  // ticked it in Settings (and passed its setup check). Users without the
+  // Claude CLI never spawn it. Failures are logged, not fatal — the Settings
+  // "Set up and test" flow is where they get diagnosed.
+  reconcileProxy();
   registerProtocol();
   buildMenu();
   createWindow();
@@ -371,6 +443,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// Stop a proxy we spawned (and cancel any in-flight build). A proxy the user
+// started themselves in a terminal is left running.
+app.on('before-quit', () => {
+  require('./services/proxy-launcher').stopProxy();
 });
 
 app.on('will-quit', () => {

@@ -60,6 +60,19 @@
     .toggle input { width: auto; }
     .toggle-label { font-size: 13px; color: #ddd; }
 
+    /* Bundled-proxy setup: locked fields and the per-step progress list. */
+    input.locked { opacity: 0.6; cursor: not-allowed; }
+    .proxy-steps { margin-top: 8px; font-size: 11px; border-left: 2px solid #333; padding-left: 10px; }
+    .proxy-step { display: flex; gap: 6px; padding: 2px 0; align-items: baseline; }
+    .proxy-step .s-icon { flex: 0 0 12px; }
+    .proxy-step .s-label { flex: 0 0 110px; color: #ccc; }
+    .proxy-step .s-detail { flex: 1; min-width: 0; color: #888; white-space: pre-wrap; word-break: break-word; }
+    .proxy-step.ok .s-icon { color: #7fc97f; }
+    .proxy-step.fail .s-icon, .proxy-step.fail .s-detail { color: #f97f7f; }
+    .proxy-step.warn .s-icon, .proxy-step.warn .s-detail { color: #e0c060; }
+    .proxy-step.run .s-icon { color: #2d7ff9; }
+    .proxy-step.skip { opacity: 0.6; }
+
     .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
     button {
       background: #2d7ff9; color: white; border: 0; padding: 7px 14px;
@@ -234,6 +247,11 @@
 
       <!-- OpenAI-compatible -->
       <div class="provider-block" data-provider="openai_compat">
+        <label class="toggle">
+          <input type="checkbox" id="use_bundled_claude_proxy" data-proxy-toggle="openai_compat">
+          <span class="toggle-label">Use bundled Claude Code CLI proxy</span>
+        </label>
+        <div class="help">Drives the app from a Claude Pro/Max subscription instead of an API key, via the vendored proxy. Requires the Claude Code CLI installed and logged in. Nothing starts until you run Set up and test below.</div>
         <label>Base URL</label>
         <input id="openai_compat_base_url" type="text" placeholder="https://api.groq.com/openai/v1">
         <div class="row">
@@ -250,6 +268,7 @@
           <button class="small" data-test="openai_compat">Test connection</button>
           <span class="test-result" id="test_openai_compat"></span>
         </div>
+        <div class="proxy-steps" id="proxy_steps_openai_compat" hidden></div>
         <div class="model-picker" id="models_openai_compat" hidden></div>
         <div class="help">For Groq, OpenRouter, Together, LM Studio, vLLM, llama.cpp server, etc. Anything that speaks the OpenAI chat-completions protocol.</div>
       </div>
@@ -340,6 +359,11 @@
 
       <!-- OpenAI-compatible -->
       <div class="provider-block" data-provider="openai_compat">
+        <label class="toggle">
+          <input type="checkbox" id="review_use_bundled_claude_proxy" data-proxy-toggle="review_openai_compat">
+          <span class="toggle-label">Use bundled Claude Code CLI proxy</span>
+        </label>
+        <div class="help">Requires the Claude Code CLI installed and logged in. Nothing starts until you run Set up and test below.</div>
         <label>Base URL</label>
         <input id="review_openai_compat_base_url" type="text" placeholder="https://api.groq.com/openai/v1">
         <div class="row">
@@ -356,6 +380,7 @@
           <button class="small" data-test="review_openai_compat">Test connection</button>
           <span class="test-result" id="test_review_openai_compat"></span>
         </div>
+        <div class="proxy-steps" id="proxy_steps_review_openai_compat" hidden></div>
         <div class="model-picker" id="models_review_openai_compat" hidden></div>
       </div>
     </fieldset>
@@ -613,6 +638,8 @@
         openai_compat_base_url: $('openai_compat_base_url').value.trim(),
         openai_compat_api_key: $('openai_compat_api_key').value.trim(),
         openai_compat_model: $('openai_compat_model').value.trim(),
+        use_bundled_claude_proxy: $('use_bundled_claude_proxy').checked,
+        review_use_bundled_claude_proxy: $('review_use_bundled_claude_proxy').checked,
 
         semantic_scholar_api_key: $('semantic_scholar_api_key').value.trim(),
         bib_file_path: $('bib_file_path').value.trim(),
@@ -655,6 +682,13 @@
       $('openai_compat_base_url').value = s.openai_compat_base_url || '';
       $('openai_compat_api_key').value = s.openai_compat_api_key || '';
       $('openai_compat_model').value = s.openai_compat_model || '';
+      $('use_bundled_claude_proxy').checked = s.use_bundled_claude_proxy === true;
+      $('review_use_bundled_claude_proxy').checked = s.review_use_bundled_claude_proxy === true;
+      lastVerifiedAt = s.bundled_proxy_verified_at || '';
+      syncProxyToggle('openai_compat');
+      syncProxyToggle('review_openai_compat');
+      showLastVerified('openai_compat');
+      showLastVerified('review_openai_compat');
 
       $('semantic_scholar_api_key').value = s.semantic_scholar_api_key || '';
       $('bib_file_path').value = s.bib_file_path || '';
@@ -764,6 +798,120 @@
       renderRows();
     }
 
+    // ── Bundled Claude Code proxy ─────────────────────────────────────────
+    // Ticking the box points the block at the local proxy and turns its Test
+    // button into a full setup: resolve the CLI, build the proxy if needed,
+    // start it, and prove it with a real request. Nothing runs until then.
+    const PROXY_BASE_URL = 'http://127.0.0.1:3456/v1';
+    const PROXY_DEFAULT_MODEL = 'claude-sonnet-4-5';
+    const PROXY_TOGGLE = {
+      openai_compat: 'use_bundled_claude_proxy',
+      review_openai_compat: 'review_use_bundled_claude_proxy',
+    };
+    // Remembers each block's own base URL/model so unticking restores them.
+    const proxyStash = {};
+    let lastVerifiedAt = '';
+
+    const proxyOn = (provider) => $(PROXY_TOGGLE[provider])?.checked === true;
+
+    function syncProxyToggle(provider) {
+      const on = proxyOn(provider);
+      const urlEl = $(`${provider}_base_url`);
+      const modelEl = $(`${provider}_model`);
+      const btn = document.querySelector(`button[data-test="${provider}"]`);
+      if (on) {
+        if (!proxyStash[provider] && urlEl.value.trim() !== PROXY_BASE_URL) {
+          proxyStash[provider] = { url: urlEl.value, model: modelEl.value };
+        }
+        urlEl.value = PROXY_BASE_URL;
+        urlEl.readOnly = true;
+        urlEl.classList.add('locked');
+        // The model stays editable — opus/sonnet/haiku is the real choice here.
+        if (!modelEl.value.trim()) modelEl.value = PROXY_DEFAULT_MODEL;
+        if (btn) btn.textContent = 'Set up and test';
+      } else {
+        urlEl.readOnly = false;
+        urlEl.classList.remove('locked');
+        const stash = proxyStash[provider];
+        if (stash) {
+          urlEl.value = stash.url;
+          modelEl.value = stash.model;
+          delete proxyStash[provider];
+        } else if (urlEl.value.trim() === PROXY_BASE_URL) {
+          urlEl.value = '';
+        }
+        if (btn) btn.textContent = 'Test connection';
+      }
+      const steps = $(`proxy_steps_${provider}`);
+      if (steps && !on) { steps.hidden = true; steps.innerHTML = ''; }
+    }
+
+    document.querySelectorAll('input[data-proxy-toggle]').forEach((box) => {
+      box.addEventListener('change', () => syncProxyToggle(box.dataset.proxyToggle));
+    });
+
+    // /health can answer fine while the CLI underneath is broken, so an old
+    // verification date is worth seeing before trusting the setup.
+    function showLastVerified(provider) {
+      if (!proxyOn(provider) || !lastVerifiedAt) return;
+      const el = $(`test_${provider}`);
+      if (!el || el.textContent) return;
+      const when = new Date(lastVerifiedAt);
+      el.textContent = `Last verified ${Number.isNaN(when.getTime()) ? lastVerifiedAt : when.toLocaleString()}`;
+    }
+
+    const STEP_ICON = { run: '…', ok: '✓', fail: '✗', warn: '!', skip: '–' };
+
+    function renderProxyStep(provider, step) {
+      const host = $(`proxy_steps_${provider}`);
+      if (!host) return;
+      host.hidden = false;
+      let row = host.querySelector(`[data-step="${step.id}"]`);
+      if (!row) {
+        row = document.createElement('div');
+        row.dataset.step = step.id;
+        row.innerHTML = '<span class="s-icon"></span><span class="s-label"></span><span class="s-detail"></span>';
+        host.appendChild(row);
+      }
+      row.className = `proxy-step ${step.status}`;
+      row.querySelector('.s-icon').textContent = STEP_ICON[step.status] || '·';
+      row.querySelector('.s-label').textContent = step.label;
+      row.querySelector('.s-detail').textContent = step.detail || '';
+    }
+
+    let proxyProgressProvider = null;
+    window.addEventListener('pdfc-proxy-setup-progress', (e) => {
+      const { provider, step } = e.detail || {};
+      // Both blocks share one proxy; only paint the block that started it.
+      if (provider !== proxyProgressProvider) return;
+      renderProxyStep(provider, step);
+    });
+
+    async function runProxySetup(provider) {
+      const host = $(`proxy_steps_${provider}`);
+      if (host) { host.hidden = false; host.innerHTML = ''; }
+      proxyProgressProvider = provider;
+      const model = $(`${provider}_model`).value.trim();
+      try {
+        const result = await window.desktop.setupClaudeProxy(provider, model);
+        (result.steps || []).forEach((s) => renderProxyStep(provider, s));
+        if (result.ok) {
+          $(`${provider}_model`).value = result.model;
+          $(`${provider}_base_url`).value = result.baseUrl;
+          lastVerifiedAt = new Date().toISOString();
+        }
+        showResult(provider, {
+          ok: result.ok,
+          message: result.ok ? `${result.message} Saved.` : `${result.code}: ${result.message}`,
+        });
+        renderModelPicker(provider, result.models);
+      } catch (err) {
+        showResult(provider, { ok: false, message: err.message || String(err) });
+      } finally {
+        proxyProgressProvider = null;
+      }
+    }
+
     document.querySelectorAll('button[data-test]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const provider = btn.dataset.test;
@@ -771,6 +919,14 @@
         const el = $(`test_${provider}`);
         if (el) { el.classList.remove('ok', 'err'); el.textContent = 'Testing…'; }
         try {
+          // The bundled proxy needs its own flow: a plain models.list() passes
+          // even when the Claude CLI is missing, because the proxy answers it
+          // from a hardcoded list without touching the CLI.
+          if (proxyOn(provider)) {
+            if (el) el.textContent = 'Setting up…';
+            await runProxySetup(provider);
+            return;
+          }
           const result = await window.desktop.testConnection(provider, readForm());
           showResult(provider, result);
           renderModelPicker(provider, result.models);

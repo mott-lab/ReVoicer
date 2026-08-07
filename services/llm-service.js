@@ -154,6 +154,20 @@ async function chat({ system, user, temperature = 0.3, provider, model, maxToken
       // Some local endpoints accept any non-empty key (or none). Default to a
       // placeholder so the SDK doesn't error before the request is sent.
       apiKey = cred('openai_compat_api_key') || 'sk-noop';
+      // Safety net for the bundled Claude proxy: it's normally started at
+      // launch, but this covers a failed startup spawn or a mid-session crash.
+      // ensureProxy is single-flight with a health cache, so the steady-state
+      // cost here is nil.
+      const proxy = require('./proxy-launcher');
+      if (proxy.isBundledProxyUrl(baseURL)) {
+        const started = await proxy.ensureProxy();
+        if (!started.ok) {
+          const err = new Error(started.message);
+          err.code = 'PROXY_UNAVAILABLE';
+          err.status = 503;
+          throw err;
+        }
+      }
     }
     const client = _openaiClient(apiKey, baseURL);
     // Reasoning tokens count against the completion budget, so give the cap

@@ -133,6 +133,8 @@ window.desktop = {
   getSettings: () => ipcRenderer.invoke('desktop:getSettings'),
   saveSettings: (updates) => ipcRenderer.invoke('desktop:saveSettings', updates),
   testConnection: (provider, params) => ipcRenderer.invoke('desktop:testConnection', provider, params),
+  setupClaudeProxy: (provider, model) => ipcRenderer.invoke('desktop:setupClaudeProxy', provider, model),
+  claudeProxyStatus: () => ipcRenderer.invoke('desktop:claudeProxyStatus'),
   llmStatus: (opts) => ipcRenderer.invoke('desktop:llmStatus', opts),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
   selectDirectory: () => ipcRenderer.invoke('desktop:selectDirectory'),
@@ -146,6 +148,11 @@ window.desktop = {
 // to (same pattern as the whisper/vosk progress toasts above).
 ipcRenderer.on('desktop:reviewChunk', (_e, payload) => {
   window.dispatchEvent(new CustomEvent('pdfc-review-chunk', { detail: payload }));
+});
+
+// Per-step progress from the bundled-proxy setup. Only settings.html listens.
+ipcRenderer.on('desktop:proxySetupProgress', (_e, payload) => {
+  window.dispatchEvent(new CustomEvent('pdfc-proxy-setup-progress', { detail: payload }));
 });
 
 // Deep-link into a Settings tab when the window is already open (fresh opens
