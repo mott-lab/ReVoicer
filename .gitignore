@@ -19,6 +19,9 @@ models/
 .DS_Store
 Thumbs.db
 
+# Personal, machine-specific notes
+*.local.md
+
 # Review examples (private)
 review-examples/
 

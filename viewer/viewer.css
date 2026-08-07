@@ -104,7 +104,8 @@ body {
   background: #4caf50;
 }
 
-.pcr-status-processing .pcr-status-dot {
+.pcr-status-processing .pcr-status-dot,
+.pcr-status-transcribing .pcr-status-dot {
   background: #fbc02d;
 }
 

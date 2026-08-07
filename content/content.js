@@ -228,12 +228,12 @@ function startRecording(selectedText) {
     if (askMode) {
       // Transcribe with Whisper for better quality, then ask. Skipped when
       // the user has chosen Vosk as the final provider — the live transcript
-      // is the final transcript. Only the transcribe leg holds a processing
+      // is the final transcript. Only the transcribe leg holds a transcribing
       // token; submitQuestion() has its own "Thinking..." answer overlay.
       let finalQuestion = transcript.trim();
       const skipServer = await shouldSkipServerTranscribe();
       if (!skipServer && audioBlob && audioBlob.size > 0) {
-        const release = statusIndicator.begin('processing');
+        const release = statusIndicator.begin('transcribing');
         try {
           const whisperResult = await apiClient.transcribe(audioBlob);
           if (whisperResult.text) finalQuestion = whisperResult.text;
@@ -578,6 +578,9 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
     let finalTranscript = rawTranscript;
     const skipServer = await shouldSkipServerTranscribe();
     if (!skipServer && audioBlob && audioBlob.size > 0) {
+      // Transcribing wins over the outer processing token, so the toolbar
+      // reads "Transcribing" during speech-to-text, then "Processing".
+      const releaseStt = statusIndicator.begin('transcribing');
       try {
         const whisperResult = await apiClient.transcribe(audioBlob);
         if (whisperResult.text) {
@@ -586,6 +589,8 @@ async function submitNote(selectedText, rawTranscript, audioBlob) {
       } catch (err) {
         // Whisper failed (not configured, or API error) — fall back to Web Speech API transcript
         console.log('PDF Converser: Whisper unavailable, using Web Speech API transcript', err.message);
+      } finally {
+        releaseStt();
       }
     }
 

@@ -15,8 +15,8 @@
 // Vosk only fills the live preview — the final transcript still comes from
 // the existing Whisper path (local or OpenAI), which has punctuation/casing.
 //
-// Progress events are dispatched as `pdfc-vosk-progress` so preload.js can
-// render a toast without coupling to this module.
+// Progress events are dispatched as `pdfc-vosk-progress` so interested UI
+// can listen without coupling to this module.
 
 const VOSK_LIB = 'pdfc://local/app/node_modules/vosk-browser/dist/vosk.js';
 const MODEL_URL = 'pdfc://local/app/models/vosk-model-small-en-us-0.15.tar.gz';
@@ -54,8 +54,7 @@ function loadVoskScript() {
 
 // Silent loader — kicked off at app startup so the first mic click is
 // instant. Emits no progress events; the interactive path
-// (getModelInteractive) handles user-visible toasts only when the user is
-// actually waiting.
+// (getModelInteractive) emits them only when the user is actually waiting.
 function ensureModel() {
   if (!_modelPromise) {
     _modelPromise = (async () => {
@@ -70,8 +69,7 @@ function ensureModel() {
 }
 
 // Used by start(). If the preload already finished, returns instantly with
-// no toast. If the user beat the preload, emit progress events so the toast
-// appears.
+// no progress events. If the user beat the preload, emit them.
 async function getModelInteractive() {
   if (_modelReady) return _modelPromise;
   emit('loading-model');
@@ -214,5 +212,5 @@ window.__voskRecognition = VoskRecognition;
     const settings = await window.desktop?.getSettings?.();
     if (settings?.speech_provider === 'off') return;
   } catch { /* settings unavailable on first run is fine — preload anyway */ }
-  ensureModel().catch(() => { /* surfaced via toast on user-initiated start() */ });
+  ensureModel().catch(() => { /* retried on user-initiated start() */ });
 })();

@@ -1956,11 +1956,14 @@ function wireReflectionMic(micBtn, onFinal, opts = {}) {
         let finalText = (transcript || '').trim();
         const skipServer = await shouldSkipServerTranscribe();
         if (!skipServer && audioBlob && audioBlob.size > 0) {
+          const releaseStt = statusIndicator.begin('transcribing');
           try {
             const whisperResult = await api.transcribe(audioBlob);
             if (whisperResult.text) finalText = whisperResult.text;
           } catch (err) {
             console.log('PDF Converser: Whisper unavailable for reflection, using live transcript', err.message);
+          } finally {
+            releaseStt();
           }
         }
         // Awaited so any LLM cleanup inside onFinal stays under the

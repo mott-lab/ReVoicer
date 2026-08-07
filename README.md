@@ -97,6 +97,17 @@ proxy you started manually in a terminal is detected and left alone, and
 if the proxy crashes mid-session the next LLM call restarts it
 transparently. Untick the checkbox (and Save) to turn all of this off.
 
+**Updating the proxy.** The submodule tracks a fork
+(`mott-lab/claude-max-api-proxy`) of the upstream project
+(`wende/claude-max-api-proxy`). When the fork gains new commits, pull
+them into the app with:
+
+```
+git submodule update --remote vendor/claude-max-api-proxy
+npm run proxy:build
+git add vendor/claude-max-api-proxy && git commit
+```
+
 For other providers, use the **Test connection** button to confirm the
 credentials work; it also lists the available models. Keys are stored
 locally in `settings.json` under your OS user-data directory (see Note

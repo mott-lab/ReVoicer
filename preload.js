@@ -238,55 +238,10 @@ async function bodyToIpc(body) {
   return body;
 }
 
-// Local Whisper progress toast. Subscribes to events emitted by
-// services/local-whisper-runtime.js so this preload doesn't need to import
-// transformers.js itself.
-let _whisperToast = null;
-function setWhisperToast(text) {
-  if (!_whisperToast || !_whisperToast.isConnected) {
-    _whisperToast = document.createElement('div');
-    _whisperToast.id = 'pdfc-whisper-progress';
-    _whisperToast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#323639;color:#e0e0e0;padding:10px 16px;border-radius:6px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.4);z-index:99999;min-width:240px;text-align:center;';
-    document.body.appendChild(_whisperToast);
-  }
-  _whisperToast.textContent = text;
-}
-function hideWhisperToast() {
-  if (_whisperToast) {
-    _whisperToast.remove();
-    _whisperToast = null;
-  }
-}
-window.addEventListener('pdfc-whisper-progress', (e) => {
-  const d = e.detail || {};
-  switch (d.stage) {
-    case 'loading-runtime': setWhisperToast('Loading Whisper runtime…'); break;
-    case 'loading-model':   setWhisperToast('Loading speech model…');   break;
-    case 'model-progress':
-      if (d.status === 'progress' && typeof d.progress === 'number') {
-        const fileLabel = d.file ? ` · ${d.file}` : '';
-        setWhisperToast(`Downloading speech model${fileLabel} — ${Math.round(d.progress)}%`);
-      } else if (d.status === 'ready' || d.status === 'done') {
-        setWhisperToast('Speech model loaded.');
-      }
-      break;
-    case 'decoding':
-    case 'inferring':       setWhisperToast('Transcribing locally…');  break;
-    case 'done':            hideWhisperToast();                         break;
-  }
-});
-
-// Vosk progress toast — same UI as Whisper's, just with text reflecting
-// that this is the live-preview model (~40 MB, downloaded once).
-window.addEventListener('pdfc-vosk-progress', (e) => {
-  const d = e.detail || {};
-  switch (d.stage) {
-    case 'loading-model':   setWhisperToast('Loading live-transcript model…'); break;
-    case 'ready':           setWhisperToast('Live transcript ready.'); break;
-    case 'listening':       hideWhisperToast(); break;
-    case 'done':            hideWhisperToast(); break;
-  }
-});
+// Local speech progress (pdfc-whisper-progress / pdfc-vosk-progress events
+// from the runtime scripts) is no longer surfaced as a toast — the toolbar
+// status indicator covers it: every transcribe call holds a "Transcribing"
+// token and recording holds a "Recording" token in the renderer flows.
 
 // Empty-but-OK transcribe response: content.js sees no text and keeps the
 // live (Vosk) transcript it already holds — the offline fallback path.

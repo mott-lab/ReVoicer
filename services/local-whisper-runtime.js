@@ -16,7 +16,7 @@
 // offline mode to decide between attempting Whisper and falling back to the
 // Vosk live transcript without triggering a model download).
 // Progress (model download + inference) is broadcast via DOM events
-// `pdfc-whisper-progress` so preload.js can render a toast without coupling
+// `pdfc-whisper-progress` so interested UI can listen without coupling
 // to this module.
 
 const MODEL_ID = 'Xenova/whisper-tiny.en';
