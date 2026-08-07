@@ -42,12 +42,13 @@ npm start
 ```
 
 `npm install` triggers a `postinstall` step that downloads the ~40 MB Vosk
-speech model into `models/` so live transcription works offline, and
-checks out and builds the bundled `claude-max-api-proxy` submodule (see
-[Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy)).
-Both steps recover from a plain `git clone` without `--recurse-submodules`,
-and failures don't block the install — retry with `npm run fetch-vosk-model`
-or `npm run proxy:build`.
+speech model into `models/` so live transcription works offline. A failed
+download doesn't block the install — retry with `npm run fetch-vosk-model`.
+The `claude-max-api-proxy` submodule is optional and is only built when
+you opt into it from Settings (see
+[Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy));
+cloning without `--recurse-submodules` is fine — the setup flow checks it
+out on demand.
 
 Then `File → Open PDF…` (`Ctrl+O`) or drag a PDF onto the window.
 `File → Open Recent` lists recently opened files.
@@ -74,23 +75,32 @@ generation — needs a configured model provider. Open
 A Claude Pro/Max subscription can power all LLM features without an API
 key, through the vendored
 [claude-max-api-proxy](vendor/claude-max-api-proxy) submodule (an
-OpenAI-compatible server wrapping the Claude Code CLI). The app starts it
-automatically on launch when nothing is listening on port 3456, and stops
-it again on quit; a proxy already running (e.g. started manually) is
-detected and left alone.
+OpenAI-compatible server wrapping the Claude Code CLI). It is strictly
+opt-in: nothing related to it runs unless you enable it, so the app works
+normally for users without the Claude CLI.
 
 Requirements: the [Claude Code CLI](https://claude.com/claude-code)
 installed and logged in (`claude` on your PATH). Then in Settings pick
-**OpenAI-compatible** with:
+**OpenAI-compatible**, tick **Use bundled Claude Code CLI proxy**, and
+click **Set up and test**. That one flow checks the CLI, builds the proxy
+on first use (checking out the submodule if needed), starts the server,
+proves the whole chain with a real one-line request, and saves the
+settings — the base URL is filled and locked automatically
+(`http://127.0.0.1:3456/v1`) and the model defaults to
+`claude-sonnet-4-5` (any id containing `opus`/`sonnet`/`haiku` routes to
+that tier; the model list shown is fixed by the proxy, not read from your
+account). Each failure mode reports a specific remedy (CLI missing, not
+logged in, port taken, build failed, proxy out of date).
 
-- Base URL: `http://localhost:3456/v1`
-- Model: `claude-sonnet` (or `claude-opus`, `claude-haiku`)
-- API key: any non-empty value (the proxy ignores it)
+Once set up, the app starts the proxy at launch and stops it on quit. A
+proxy you started manually in a terminal is detected and left alone, and
+if the proxy crashes mid-session the next LLM call restarts it
+transparently. Untick the checkbox (and Save) to turn all of this off.
 
-Use the **Test** button next to the provider to confirm the credentials
-work; it also lists the available models. Keys are stored locally in
-`settings.json` under your OS user-data directory (see Note Storage
-below) and are only ever sent to the provider you configured.
+For other providers, use the **Test connection** button to confirm the
+credentials work; it also lists the available models. Keys are stored
+locally in `settings.json` under your OS user-data directory (see Note
+Storage below) and are only ever sent to the provider you configured.
 
 Without a provider configured, the app still works as a PDF
 reader/annotator: notes are saved with their raw text and marked
@@ -110,6 +120,12 @@ added, **Clean pending (N)** in the Notes toolbar processes the backlog.
 5. Annotated text is highlighted in the PDF in a color matching the
    comment type. Click a highlight to jump to that note in the side
    panel; click a note in the panel to scroll the PDF to its passage.
+
+Zoom with the toolbar buttons or `Ctrl/Cmd + scroll wheel` (anchored at
+the cursor). A status light in the toolbar's top-right corner shows what
+the app is doing at any moment: blinking red while recording, yellow
+while transcribing or waiting on the LLM, green when idle. Errors still
+appear as toast messages with a suggested fix.
 
 ### Asking Questions
 
@@ -134,6 +150,9 @@ short note about the feature's purpose plus pointers to the passages
 where the authors address the topic, so you can judge for yourself. If
 the paper doesn't cover something, it says so rather than filling the
 gap.
+
+Ask sends the full paper text to the LLM, so it is disabled while
+[Privacy Mode](#privacy-mode) is on.
 
 ### Viewing Annotations
 
@@ -214,17 +233,23 @@ For writing a structured review of the paper:
   annotations against the rubric and reports each component as covered /
   partial / missing, with the supporting notes and a one-line gap
   summary. The result is saved per PDF and can be re-run any time.
+- **Overall reflections** (top of the Review tab) — your whole-paper
+  impressions, typed or spoken (the mic swaps to Add/Cancel while
+  recording). Reflections are LLM-cleaned like annotations, editable,
+  and each card has a **Clean / Re-clean** button. They feed review
+  generation as the framing for the overall assessment; if a paper has
+  none yet, Generate Review offers a chance to add one first.
 - **Review** — **Generate Review** drafts a full review from the
-  manuscript text, your annotations, the rubric, and the References tab
-  entries (cited verbatim where relevant), following the note context,
-  additional instructions, and writing style guide configured in
-  Settings. Output streams into the panel with the model's reasoning in
-  a collapsible Thinking feed; when done, the draft opens in an editable
-  panel with the model's commentary kept in a read-only "Model
-  commentary" box above it. **Save** always opens a save dialog,
-  defaulting to `<paper>_review.md` in the same folder as the PDF. The
-  draft (and commentary) persist per PDF, and the saved `.md` file is
-  treated as the canonical copy on reload.
+  manuscript text, your annotations, your overall reflections, the
+  rubric, and the References tab entries (cited verbatim where
+  relevant), following the note context, additional instructions, and
+  writing style guide configured in Settings. Output streams into the
+  panel with the model's reasoning in a collapsible Thinking feed; when
+  done, the draft opens in an editable panel with the model's commentary
+  kept in a read-only "Model commentary" box above it. **Save** always
+  opens a save dialog, defaulting to `<paper>_review.md` in the same
+  folder as the PDF. The draft (and commentary) persist per PDF, and the
+  saved `.md` file is treated as the canonical copy on reload.
 
 ## Offline Mode
 
@@ -249,6 +274,40 @@ unchecked keep their text verbatim — they only get tags and a section
 assigned. Failures leave the note pending; each note also has its own
 **Clean** button.
 
+## Privacy Mode
+
+Some venues forbid sending submission content to an LLM. The **Privacy
+Mode** toggle (Settings → Text Processing) guarantees that no paper
+content ever appears in an LLM prompt — no document text, no surrounding
+page context, no highlighted passages, no bibliography strings from the
+PDF. Prompts carry only your own words: transcripts and typed comments,
+reflections, pasted rubric text, the style guide, review instructions,
+and your personal `.bib` reference library. Enforcement happens where
+prompts are assembled, not just in the UI.
+
+Still works while it's on: annotation cleanup and tagging (including
+reference substitution from your library), reflections, review drafting
+from your notes, Check Review, rubric tools, the style guide, and the By
+Theme view (grouped from your comments alone). What changes:
+
+- **Ask is disabled** — its prompt is the manuscript itself, so there is
+  no degraded version. The Ask buttons disappear and any request is
+  refused.
+- New notes get **no paper-section inference** (it would be an
+  ungrounded guess without the passage); re-cleaning an older note keeps
+  its previously assigned section.
+- Generated reviews **cannot quote or verify against the manuscript** —
+  the model is instructed to write only from your annotations and
+  reflections.
+
+Two boundaries to be aware of: speech still goes to your configured
+transcription provider (it is your own words — use Local Whisper or Vosk
+to keep audio on-machine), and citation lookup still queries Semantic
+Scholar/OpenAlex with reference strings from the PDF (only its LLM
+parsing step is skipped) — those are web APIs, not LLMs. Highlights are
+unaffected: the selected text stays stored locally, it just never leaves
+in a prompt.
+
 ## Settings (`File → Settings…`, `Ctrl/Cmd+,`)
 
 Five tabs. Text and speech are configured independently; the review
@@ -256,20 +315,25 @@ generator has its own provider so a stronger model can draft reviews.
 
 **Text Processing** — used for cleanup, organize, classification, and Q&A:
 - **Offline mode** toggle (same setting as the sidebar button).
+- **Privacy mode** toggle — never send paper content to the LLM (see
+  [Privacy Mode](#privacy-mode)).
 - "Use LLM to clean up annotations" toggle. When off, annotations are
   saved verbatim with a heuristic type label and no LLM call is made on
   creation. Q&A and Organize still need a configured provider.
 - Provider: OpenAI · Anthropic · Ollama · OpenAI-compatible (Groq,
   OpenRouter, Together, LM Studio, vLLM, llama.cpp server, …). Each
   provider keeps its own credentials with a Test button that also lists
-  available models.
+  available models. The OpenAI-compatible block also hosts the bundled
+  Claude proxy opt-in (see
+  [Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy)).
 
 **Speech-to-Text** — for voice annotations:
 - **OpenAI Whisper** — uses the OpenAI key from the Text section.
-- **Local Whisper** — `Xenova/whisper-tiny.en` runs in the renderer via
-  WebAssembly (`@huggingface/transformers`, loaded from jsdelivr).
-  ~75 MB downloaded from huggingface.co on first record, then cached.
-  Audio never leaves the machine.
+- **Local Whisper** — `Xenova/whisper-tiny.en` runs in a Web Worker via
+  WebAssembly (`@huggingface/transformers`, loaded from jsdelivr), so
+  transcription never blocks scrolling or the UI. ~75 MB downloaded from
+  huggingface.co on first record, then cached. Audio never leaves the
+  machine.
 - **Vosk (raw)** — fully offline via the bundled model. Lowercase, no
   punctuation. Pair with cleanup off to keep raw output, or leave cleanup
   on to have the LLM polish it.
@@ -325,6 +389,7 @@ of its content:
 - `{hash}.text.json` — extracted full text
 - `{hash}.qa.json` — Q&A history
 - `{hash}.refs.json` — user references
+- `{hash}.reflections.json` — overall reflections
 - `{hash}.rubric.json` — rubric items
 - `{hash}.review.json` — rubric coverage check
 - `{hash}.review-draft.json` — generated review draft
@@ -374,7 +439,8 @@ scheme means:
 - `lib/` — shared modules: `api-client.js` (fetch wrapper for the
   in-process API), `speech.js` (`SpeechCapture` — MediaRecorder + live
   transcript via Vosk), `pdf-identifier.js` (content hash + page
-  number helpers).
+  number helpers), `status-indicator.js` (the toolbar status light),
+  `error-messages.js` (shared error-to-guidance classifier).
 
 ### Services (in-process equivalents of the old Python backend)
 
@@ -384,9 +450,9 @@ by copy.
 
 - Stores (fs-backed persistence under `app.getPath('userData')/notes/`):
   `note-store.js`, `document-store.js`, `qa-store.js`,
-  `references-store.js`, `rubric-store.js`, `rubric-templates-store.js`,
-  `citations-store.js`, `review-check-store.js`,
-  `review-generate-store.js`.
+  `references-store.js`, `reflection-store.js`, `rubric-store.js`,
+  `rubric-templates-store.js`, `citations-store.js`,
+  `review-check-store.js`, `review-generate-store.js`.
 - LLM-driven: `cleanup-service.js` (note cleanup + multi-tag/section
   classification), `organize-service.js` (grouping), `qa-service.js`
   (document Q&A), `rubric-extract-service.js` (parse pasted rubric
@@ -400,6 +466,11 @@ by copy.
   (DOI/arXiv/title extraction helpers).
 - `transcribe-service.js` — speech-to-text routing (cloud Whisper path).
 - `export-service.js` — Markdown export.
+- `proxy-launcher.js` — opt-in lifecycle for the bundled Claude proxy
+  (CLI resolution, on-demand build, health-checked start/stop, and the
+  Settings "Set up and test" flow).
+- `bib-library-service.js` / `bib-parser.js` — the user's `.bib`
+  reference library (watch, parse, search).
 - `llm-service.js` — provider-agnostic `chat()` wrapper. OpenAI &
   OpenAI-compatible via the `openai` SDK; Anthropic via
   `@anthropic-ai/sdk`; Ollama via plain `fetch` to its `/api/chat`.
@@ -407,7 +478,10 @@ by copy.
 - `settings-store.js` — settings persistence + migration of legacy fields.
 - `recent-files.js` — JSON-backed recent-PDFs list.
 - `local-whisper-runtime.js` — renderer-side, exposes
-  `window.__localWhisper` (`transcribe(blob)`, `isModelCached()`).
+  `window.__localWhisper` (`transcribe(blob)`, `isModelCached()`);
+  decoding stays on the main thread, inference runs in
+  `local-whisper-worker.js` (a Blob-URL Web Worker) so the UI never
+  blocks.
 - `vosk-runtime.js` — renderer-side, exposes `window.__voskRecognition`
   (a `SpeechRecognition`-shaped class). The bundled model is loaded
   from `pdfc://local/app/models/…` so the app stays offline.
@@ -418,6 +492,9 @@ by copy.
   (downloaded by `scripts/download-vosk-model.js` on `npm install`).
 - `scripts/download-vosk-model.js` — postinstall fetcher; idempotent and
   non-fatal on failure.
+- `scripts/setup-proxy.js` — on-demand submodule checkout + build for the
+  bundled Claude proxy (invoked by the Settings setup flow, or manually
+  via `npm run proxy:build`).
 
 ## Future Ideas
 
