@@ -23,7 +23,6 @@ let activeRenderTask = null;
 let textExtractedFired = false;
 let pageTextContents = [];
 let pageAnnotations = [];
-let pageDisplayScales = [];
 
 // Get the PDF URL from query params
 const params = new URLSearchParams(window.location.search);
@@ -86,7 +85,6 @@ async function loadPdf(url) {
     textExtractedFired = false;
     pageTextContents = [];
     pageAnnotations = [];
-    pageDisplayScales = [];
     for (const k of Object.keys(pageTexts)) delete pageTexts[k];
 
     // Pre-fetch every PDFPageProxy. pdf.js caches page objects internally, so
@@ -115,10 +113,6 @@ async function loadPdf(url) {
       return pageDiv;
     });
     for (const div of pageDivs) pagesContainer.appendChild(div);
-    // Track scale represented by initial blank canvases so canceled renders
-    // still scale existing interaction layers from correct baseline.
-    pageDisplayScales = pdfPages.map(() => currentScale);
-
     // Initial render at the current scale, then fit-to-width (which triggers
     // its own rerender — the generation guard handles the overlap cleanly).
     await rerender();
@@ -261,21 +255,12 @@ async function rerender() {
     canvas.style.width = `${Math.floor(vp.width)}px`;
     canvas.style.height = `${Math.floor(vp.height)}px`;
 
-    // Existing interaction layers belong to previous scale. Scale them with
-    // old bitmap until replacement render finishes, avoiding stale hitboxes.
-    const previousScale = pageDisplayScales[i] || currentScale;
-    const layerScale = currentScale / previousScale;
-    const textLayer = div.querySelector('.text-layer');
-    const annotationLayer = div.querySelector('.annotation-layer');
+    // Hide old interaction geometry while page renders at new scale. Keeping
+    // stale layers visible makes text, links, and highlights drift apart.
+    div.querySelector('.text-layer').style.visibility = 'hidden';
+    div.querySelector('.annotation-layer').style.visibility = 'hidden';
     const highlightLayer = div.querySelector('.pcr-highlight-layer');
-    textLayer.style.transformOrigin = '0 0';
-    annotationLayer.style.transformOrigin = '0 0';
-    textLayer.style.transform = `scale(${layerScale})`;
-    annotationLayer.style.transform = `scale(${layerScale})`;
-    if (highlightLayer) {
-      highlightLayer.style.transformOrigin = '0 0';
-      highlightLayer.style.transform = `scale(${layerScale})`;
-    }
+    if (highlightLayer) highlightLayer.style.visibility = 'hidden';
   }
 
   // Page-by-page render. We bail after every await if a newer zoom kicked
@@ -336,11 +321,10 @@ async function rerender() {
     const annotationLayer = div.querySelector('.annotation-layer');
     annotationLayer.innerHTML = '';
     renderAnnotationLayer(annotations, annotationLayer, viewport);
-    textLayerDiv.style.transform = '';
-    annotationLayer.style.transform = '';
+    textLayerDiv.style.visibility = 'visible';
+    annotationLayer.style.visibility = 'visible';
     const highlightLayer = div.querySelector('.pcr-highlight-layer');
-    if (highlightLayer) highlightLayer.style.transform = '';
-    pageDisplayScales[i] = currentScale;
+    if (highlightLayer) highlightLayer.style.visibility = 'visible';
 
     document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
   }
