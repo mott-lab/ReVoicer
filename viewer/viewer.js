@@ -321,23 +321,57 @@ function fitToWidth() {
 }
 
 // Toolbar controls
-document.getElementById('zoom-in').addEventListener('click', () => {
-  if (currentScale < MAX_SCALE) {
-    currentScale = Math.min(currentScale + SCALE_STEP, MAX_SCALE);
-    document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
-    rerender();
+function setZoom(nextScale, anchor) {
+  const container = document.getElementById('viewer-container');
+  const oldScale = currentScale;
+  currentScale = Math.max(MIN_SCALE, Math.min(nextScale, MAX_SCALE));
+  if (currentScale === oldScale) return;
+
+  document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
+  rerender();
+
+  // Pages are centered inside #pages, so scrollLeft is not a direct PDF
+  // coordinate. Re-find the same page after its synchronous resize and move
+  // scroll offsets by the point's actual viewport displacement.
+  if (anchor) {
+    const page = pageDivs[anchor.pageIndex];
+    if (!page) return;
+    const rect = page.getBoundingClientRect();
+    const pointX = rect.left + rect.width * anchor.xRatio;
+    const pointY = rect.top + rect.height * anchor.yRatio;
+    container.scrollLeft += pointX - anchor.clientX;
+    container.scrollTop += pointY - anchor.clientY;
   }
+}
+
+document.getElementById('zoom-in').addEventListener('click', () => {
+  setZoom(currentScale + SCALE_STEP);
 });
 
 document.getElementById('zoom-out').addEventListener('click', () => {
-  if (currentScale > MIN_SCALE) {
-    currentScale = Math.max(currentScale - SCALE_STEP, MIN_SCALE);
-    document.getElementById('zoom-level').textContent = `${Math.round(currentScale * 100)}%`;
-    rerender();
-  }
+  setZoom(currentScale - SCALE_STEP);
 });
 
 document.getElementById('zoom-fit').addEventListener('click', fitToWidth);
+
+// Ctrl/Cmd + wheel zooms the PDF instead of scrolling it. Browser/Electron
+// reports the modifier as ctrlKey on Windows/Linux and metaKey on macOS.
+document.getElementById('viewer-container').addEventListener('wheel', (event) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+
+  event.preventDefault();
+  const page = event.target.closest?.('.pdf-page');
+  const pageRect = page?.getBoundingClientRect();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  const anchor = page ? {
+    pageIndex: Number(page.dataset.pageNumber) - 1,
+    xRatio: (event.clientX - pageRect.left) / pageRect.width,
+    yRatio: (event.clientY - pageRect.top) / pageRect.height,
+    clientX: event.clientX,
+    clientY: event.clientY,
+  } : null;
+  setZoom(currentScale + direction * SCALE_STEP, anchor);
+}, { passive: false });
 
 document.getElementById('prev-page').addEventListener('click', () => {
   const input = document.getElementById('page-input');

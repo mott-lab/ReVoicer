@@ -126,9 +126,10 @@ body {
   right: 0;
   bottom: 0;
   overflow: auto;
+  overflow-anchor: none;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
 }
 
 #pages {
@@ -137,6 +138,10 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  /* Let wide zoomed pages expand the scrollable content horizontally.
+     Without this, centered flex content can clamp scrollLeft at zero. */
+  width: max-content;
+  min-width: 100%;
 }
 
 /* Individual page */
