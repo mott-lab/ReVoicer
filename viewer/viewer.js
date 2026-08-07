@@ -21,6 +21,8 @@ let pageDivs = [];
 let renderGeneration = 0;
 let activeRenderTask = null;
 let textExtractedFired = false;
+let pageTextContents = [];
+let pageAnnotations = [];
 
 // Get the PDF URL from query params
 const params = new URLSearchParams(window.location.search);
@@ -81,6 +83,8 @@ async function loadPdf(url) {
     }
     renderGeneration++;
     textExtractedFired = false;
+    pageTextContents = [];
+    pageAnnotations = [];
     for (const k of Object.keys(pageTexts)) delete pageTexts[k];
 
     // Pre-fetch every PDFPageProxy. pdf.js caches page objects internally, so
@@ -247,12 +251,10 @@ async function rerender() {
     div.style.width = `${vp.width}px`;
     div.style.height = `${vp.height}px`;
     const canvas = div.querySelector('canvas');
-    canvas.width = Math.floor(vp.width * dpr);
-    canvas.height = Math.floor(vp.height * dpr);
+    // Keep old bitmap visible while new scale renders. Resizing canvas here would
+    // clear it immediately, producing a white flash on every zoom.
     canvas.style.width = `${Math.floor(vp.width)}px`;
     canvas.style.height = `${Math.floor(vp.height)}px`;
-    div.querySelector('.text-layer').innerHTML = '';
-    div.querySelector('.annotation-layer').innerHTML = '';
   }
 
   // Page-by-page render. We bail after every await if a newer zoom kicked
@@ -263,7 +265,12 @@ async function rerender() {
     const div = pageDivs[i];
     const viewport = page.getViewport({ scale: currentScale });
     const canvas = div.querySelector('canvas');
-    const ctx = canvas.getContext('2d');
+    // Render offscreen. Visible canvas is replaced only after pdf.js completes,
+    // keeping previous scale visible during expensive rasterization.
+    const renderCanvas = document.createElement('canvas');
+    renderCanvas.width = Math.floor(viewport.width * dpr);
+    renderCanvas.height = Math.floor(viewport.height * dpr);
+    const ctx = renderCanvas.getContext('2d');
 
     // Match the DPR-multiplied canvas: pdf.js draws into a buffer that's
     // `dpr` times larger than the viewport, then the browser downsamples to
@@ -274,6 +281,10 @@ async function rerender() {
     activeRenderTask = task;
     try {
       await task.promise;
+      if (myGen !== renderGeneration) return;
+      canvas.width = renderCanvas.width;
+      canvas.height = renderCanvas.height;
+      canvas.getContext('2d').drawImage(renderCanvas, 0, 0);
     } catch (err) {
       // pdf.js throws RenderingCancelledException when cancel() is called;
       // that's expected when a newer zoom raced this one.
@@ -284,16 +295,26 @@ async function rerender() {
     }
     if (myGen !== renderGeneration) return;
 
-    const textContent = await page.getTextContent();
+    let textContent = pageTextContents[i];
+    if (!textContent) {
+      textContent = await page.getTextContent();
+      pageTextContents[i] = textContent;
+      pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
+    }
     if (myGen !== renderGeneration) return;
     const textLayerDiv = div.querySelector('.text-layer');
     textLayerDiv.innerHTML = '';
     renderTextLayer(textContent, textLayerDiv, viewport);
-    pageTexts[i + 1] = textContent.items.map(item => item.str).join(' ');
 
-    const annotations = await page.getAnnotations();
+    let annotations = pageAnnotations[i];
+    if (!annotations) {
+      annotations = await page.getAnnotations();
+      pageAnnotations[i] = annotations;
+    }
     if (myGen !== renderGeneration) return;
-    renderAnnotationLayer(annotations, div.querySelector('.annotation-layer'), viewport);
+    const annotationLayer = div.querySelector('.annotation-layer');
+    annotationLayer.innerHTML = '';
+    renderAnnotationLayer(annotations, annotationLayer, viewport);
 
     document.dispatchEvent(new CustomEvent('pdfpagerendered', { detail: { pageNum: i + 1 } }));
   }
