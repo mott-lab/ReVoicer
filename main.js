@@ -375,7 +375,11 @@ ipcMain.handle('desktop:testConnection', (_e, provider, params) => {
 ipcMain.handle('desktop:llmStatus', (_e, opts) => {
   const { llmConfigStatus } = require('./services/llm-service');
   const status = llmConfigStatus(opts || {});
-  status.cleanupEnabled = getSettingsStore().get().cleanup_enabled !== false;
+  const s = getSettingsStore().get();
+  status.cleanupEnabled = s.cleanup_enabled !== false;
+  // Separate field, not folded into `ok` — privacy mode disables only the
+  // features that would send paper content (Ask); cleanup etc. still work.
+  status.privacyMode = s.privacy_mode === true;
   return status;
 });
 

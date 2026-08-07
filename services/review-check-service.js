@@ -9,6 +9,7 @@
 const { chat, parseJsonResponse } = require('./llm-service');
 const { getNoteStore } = require('./note-store');
 const { getReviewCheckStore } = require('./review-check-store');
+const { getSettingsStore } = require('./settings-store');
 
 const REVIEW_SYSTEM = `You are helping a peer reviewer check that their annotations on a paper cover every section of their reviewing rubric.
 
@@ -47,12 +48,16 @@ async function checkReview({ pdfIdentifier, rubricItems }) {
     };
   }
 
+  // Privacy mode: the highlighted passages are paper content; coverage is
+  // judged from the comments alone. (The system prompt never mentions
+  // highlights, so no wording change is needed.)
+  const privacy = getSettingsStore().get().privacy_mode === true;
   const notesData = notes.map((n) => ({
     id: n.id,
     page_number: n.page_number || 0,
     section: n.section || null,
     comment_tags: n.comment_tags || [],
-    selected_text: (n.selected_text || '').slice(0, 200),
+    ...(privacy ? {} : { selected_text: (n.selected_text || '').slice(0, 200) }),
     cleaned_comment: n.cleaned_comment || '',
   }));
 

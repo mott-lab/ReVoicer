@@ -4,6 +4,7 @@
 
 const { chat, parseJsonResponse } = require('./llm-service');
 const { getNoteStore } = require('./note-store');
+const { getSettingsStore } = require('./settings-store');
 
 const SECTION_ORDER = [
   'abstract', 'introduction', 'background', 'related_work_section',
@@ -22,8 +23,10 @@ const SECTION_LABELS = {
   references: 'References',
 };
 
-const BY_THEME_SYSTEM = `You are organizing annotations from an academic paper.
-Given a list of annotations with their highlighted text and cleaned comments, group them by intellectual theme or topic. Examples of themes:
+// hasHighlights: privacy mode omits the highlighted text from the note JSON,
+// so the prompt must not promise a field that isn't there.
+const byThemeSystem = (hasHighlights) => `You are organizing annotations from an academic paper.
+Given a list of annotations with their ${hasHighlights ? 'highlighted text and ' : ''}cleaned comments, group them by intellectual theme or topic. Examples of themes:
 - Methodology concerns
 - Key findings
 - Connections to other work
@@ -67,17 +70,20 @@ function organizeBySection(notes) {
 
 async function organizeByTheme(notes) {
   if (notes.length === 0) return { groups: [] };
+  // Privacy mode: the highlighted passages are paper content — theme grouping
+  // works on the cleaned comments alone.
+  const privacy = getSettingsStore().get().privacy_mode === true;
   const notesData = notes.map((n) => ({
     id: n.id,
     page_number: n.page_number || 0,
-    selected_text: (n.selected_text || '').slice(0, 200),
+    ...(privacy ? {} : { selected_text: (n.selected_text || '').slice(0, 200) }),
     cleaned_comment: n.cleaned_comment || '',
   }));
   const notesJson = JSON.stringify(notesData, null, 2);
 
   let content;
   try {
-    content = await chat({ system: BY_THEME_SYSTEM, user: `Here are the annotations:\n\n${notesJson}` });
+    content = await chat({ system: byThemeSystem(!privacy), user: `Here are the annotations:\n\n${notesJson}` });
   } catch (err) {
     return { groups: [{ title: `All Notes (LLM error: ${err.message})`, notes }] };
   }

@@ -73,7 +73,7 @@ const routes = {
   },
 
   'POST /api/notes/': async ({ body }) => {
-    const { cleanup_enabled, offline_mode } = getSettingsStore().get();
+    const { cleanup_enabled, offline_mode, privacy_mode } = getSettingsStore().get();
     // Cleanup and classify-only both call the LLM, so a note that needs either
     // can't be processed when offline or when the provider has no credentials.
     // Rather than failing, save it raw and mark it pending — the sidebar's
@@ -102,9 +102,14 @@ const routes = {
       return { ...note, pending_reason: offline_mode ? 'offline' : llmStatus.reason };
     }
     const skipRewrite = body.skip_cleanup || !cleanup_enabled;
-    const pageContext = cleanup_enabled
+    // Privacy mode: the LLM sees only the transcript — no page context and no
+    // highlighted passage. The prompt builders adapt (no section task), so
+    // `section` comes back null. Storage below still keeps the real
+    // selected_text; highlights are unaffected.
+    const pageContext = (cleanup_enabled && !privacy_mode)
       ? await buildPageContext(body.pdf_identifier, body.page_number)
       : '';
+    const promptSelectedText = privacy_mode ? '' : (body.selected_text || '');
     const references = cleanup_enabled
       ? await getReferencesStore().listReferences(body.pdf_identifier)
       : [];
@@ -114,7 +119,7 @@ const routes = {
     if (skipRewrite) {
       cleaned = body.raw_transcript || '';
       if (cleanup_enabled) {
-        const r = await classifyCommentType(body.selected_text || '', body.raw_transcript || '', pageContext, references);
+        const r = await classifyCommentType(promptSelectedText, body.raw_transcript || '', pageContext, references);
         commentTags = r.tags;
         section = r.section;
       } else {
@@ -122,7 +127,7 @@ const routes = {
         section = null;
       }
     } else {
-      const result = await cleanupTranscript(body.selected_text || '', body.raw_transcript || '', pageContext, references);
+      const result = await cleanupTranscript(promptSelectedText, body.raw_transcript || '', pageContext, references);
       cleaned = result.comment;
       commentTags = result.tags;
       section = result.section;
@@ -149,7 +154,8 @@ const routes = {
   },
 
   'PUT /api/notes/:id/reclean': async ({ params, query }) => {
-    if (getSettingsStore().get().offline_mode) {
+    const { offline_mode, privacy_mode } = getSettingsStore().get();
+    if (offline_mode) {
       return {
         __status: 503,
         error: 'Offline mode is on — turn it off in Settings to clean notes.',
@@ -159,7 +165,14 @@ const routes = {
     const store = getNoteStore();
     const note = await store.getNote(query.pdf_identifier, params.id);
     if (!note) return { __status: 404, error: 'Note not found' };
-    const pageContext = await buildPageContext(query.pdf_identifier, note.page_number);
+    // Privacy mode: transcript-only prompts (see POST /api/notes/). The
+    // builders return no section then, so omit the key entirely — updateNote
+    // merges with Object.assign, and a re-clean must not wipe a section that
+    // was inferred back when context was allowed.
+    const pageContext = privacy_mode
+      ? ''
+      : await buildPageContext(query.pdf_identifier, note.page_number);
+    const promptSelectedText = privacy_mode ? '' : (note.selected_text || '');
     const references = await getReferencesStore().listReferences(query.pdf_identifier);
 
     // Pending classify-only notes (typed offline with "Clean up with LLM"
@@ -167,20 +180,20 @@ const routes = {
     // An explicit Re-clean of an already-done note is always a full clean.
     if (note.cleanup_status === 'pending' && note.cleanup_mode === 'classify') {
       const { tags, section } = await classifyCommentType(
-        note.selected_text || '',
+        promptSelectedText,
         note.raw_transcript || '',
         pageContext,
         references,
       );
       return store.updateNote(query.pdf_identifier, params.id, {
         comment_tags: tags,
-        section,
+        ...(privacy_mode ? {} : { section }),
         cleanup_status: 'done',
       });
     }
 
     const { comment, tags, section } = await cleanupTranscript(
-      note.selected_text || '',
+      promptSelectedText,
       note.raw_transcript || '',
       pageContext,
       references,
@@ -188,7 +201,7 @@ const routes = {
     return store.updateNote(query.pdf_identifier, params.id, {
       cleaned_comment: comment,
       comment_tags: tags,
-      section,
+      ...(privacy_mode ? {} : { section }),
       cleanup_status: 'done',
     });
   },

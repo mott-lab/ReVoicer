@@ -37,6 +37,13 @@ const DEFAULTS = {
   speech_provider: 'openai_whisper', // 'openai_whisper' | 'local_whisper' | 'vosk' | 'off'
 
   // OpenAI (text + Whisper share the same key).
+  // Privacy mode: never send paper content to the LLM — no document text, no
+  // page context, no highlighted passages, no bibliography strings from the
+  // PDF. Only the user's own words (transcripts, typed comments, reflections,
+  // rubric text, style guide, their .bib library) may appear in prompts.
+  // Enforced in the services/api-stub prompt assembly, not just the UI.
+  privacy_mode: false,
+
   openai_api_key: '',
   openai_model: 'gpt-4o-mini',
   openai_base_url: '',               // empty → SDK default (api.openai.com)

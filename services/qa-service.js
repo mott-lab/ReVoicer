@@ -3,6 +3,7 @@
 const { chat } = require('./llm-service');
 const { getDocumentStore } = require('./document-store');
 const { getQAStore } = require('./qa-store');
+const { getSettingsStore } = require('./settings-store');
 
 function qaSystemPrompt(documentText) {
   return `You are the "Ask" feature of a PDF reading tool for peer reviewers. Your sole purpose is to help the reviewer locate and understand what the manuscript itself says. You are a lookup and comprehension aid, not a co-reviewer.
@@ -19,6 +20,15 @@ ${documentText}
 }
 
 async function askQuestion({ pdfIdentifier, question, selectedText, pageNumber }) {
+  // Ask's system prompt IS the manuscript — there is no degraded version, so
+  // privacy mode refuses outright. Guard here (not just the UI) so any caller,
+  // including a stale renderer, gets a clean coded error.
+  if (getSettingsStore().get().privacy_mode === true) {
+    const err = new Error('Privacy mode is on — Ask sends the paper text to the LLM and is disabled. Turn it off in Settings.');
+    err.code = 'PRIVACY';
+    err.status = 503;
+    throw err;
+  }
   const docStore = getDocumentStore();
   const pages = await docStore.loadDocumentText(pdfIdentifier);
   if (!pages) {

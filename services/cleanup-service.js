@@ -45,6 +45,16 @@ ${pageContext}
 ---`;
 }
 
+function highlightBlock(selectedText) {
+  if (!selectedText) return '';
+  return `
+
+The user highlighted the following text from the paper:
+---
+${selectedText}
+---`;
+}
+
 // Format the user-curated reference library for the cleanup prompt. The LLM
 // uses this to resolve loose mentions ("the Smith paper", "see Smith
 // et al.") into the proper author/title/link the user wants in the cleaned
@@ -69,15 +79,42 @@ ${lines.join('\n')}
 ---`;
 }
 
+// Composed from conditional blocks so it stays coherent whatever context is
+// available. Privacy mode passes no selectedText/pageContext: the intro, the
+// task list (numbering included), and the output spec all adapt — no dangling
+// "the passage above" and no section task the model can't ground.
 function cleanupSystemPrompt(selectedText, pageContext, references) {
-  return `You are a research annotation assistant. Your job is to clean up a voice-recorded annotation about a passage in an academic paper, classify its type(s), and identify which section of the paper the passage is in.
+  const hasPassage = !!selectedText;
+  const refsBlock = referencesBlock(references);
 
-The user highlighted the following text from the paper:
----
-${selectedText}
----${pageContextBlock(pageContext)}${referencesBlock(references)}
+  const intro = hasPassage
+    ? 'clean up a voice-recorded annotation about a passage in an academic paper, classify its type(s), and identify which section of the paper the passage is in'
+    : 'clean up a voice-recorded annotation a user made while reading an academic paper, and classify its type(s)';
 
-They then spoke their annotation aloud. The raw speech transcript may contain:
+  const tasks = [];
+  tasks.push(`Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their distinct intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not drop any substantive point they made. Just clean up the delivery.
+
+   The speaker often DOUBLES BACK: they raise a point early, move on to something else, then return to that first point later to add detail, clarify, or correct it. When this happens, MERGE every statement about the same point into ONE coherent point, placed where they first raised it — do not emit the revisited point as a second, separate item. Treat later remarks as enriching that single point, and treat a later correction as the speaker's final intent (drop the version it supersedes). Consolidating repeated mentions of the SAME idea is NOT removing content: aim for one well-developed point per distinct idea, not one item per time they happened to mention it. When two mentions are genuinely about different ideas, keep them separate.${refsBlock ? `
+
+   When the transcript mentions a work that matches an entry in the reference library above, replace the loose mention with the proper author + title (and link in parentheses if available).` : ''}`);
+  tasks.push(`Classify the comment with one or more tags from this list. Use multiple tags ONLY when the comment genuinely spans categories (e.g. a strength that also leads to a suggestion). Most comments need just one tag.
+${TAG_DESCRIPTIONS}`);
+  if (hasPassage) {
+    tasks.push(`Identify which section of the paper the highlighted passage is in. Use one of:
+${SECTION_DESCRIPTIONS}
+Use "other" if it doesn't fit. Infer from page context and content.`);
+  }
+  const numberedTasks = tasks.map((t, i) => `${i + 1}. ${t}`).join('\n\n');
+
+  const outputSpec = hasPassage
+    ? `exactly three fields:
+{"comment": "the cleaned annotation", "tags": ["tag1", "tag2"], "section": "section_name"}`
+    : `exactly two fields:
+{"comment": "the cleaned annotation", "tags": ["tag1", "tag2"]}`;
+
+  return `You are a research annotation assistant. Your job is to ${intro}.${highlightBlock(selectedText)}${pageContextBlock(pageContext)}${refsBlock}
+
+The user spoke their annotation aloud. The raw speech transcript may contain:
 - Filler words (um, uh, like, you know)
 - False starts and self-corrections
 - Rambling or repetitive phrasing
@@ -85,47 +122,52 @@ They then spoke their annotation aloud. The raw speech transcript may contain:
 - Doubling back: returning to an earlier point later in the recording to add detail, clarify, or correct it
 
 Your task:
-1. Rewrite their annotation as a clear, concise, well-structured comment that PRESERVES ALL of their distinct intellectual content, insights, questions, and critiques. Do not add your own analysis. Do not drop any substantive point they made. Just clean up the delivery.
+${numberedTasks}
 
-   The speaker often DOUBLES BACK: they raise a point early, move on to something else, then return to that first point later to add detail, clarify, or correct it. When this happens, MERGE every statement about the same point into ONE coherent point, placed where they first raised it — do not emit the revisited point as a second, separate item. Treat later remarks as enriching that single point, and treat a later correction as the speaker's final intent (drop the version it supersedes). Consolidating repeated mentions of the SAME idea is NOT removing content: aim for one well-developed point per distinct idea, not one item per time they happened to mention it. When two mentions are genuinely about different ideas, keep them separate.
-
-   When the transcript mentions a work that matches an entry in the reference library above, replace the loose mention with the proper author + title (and link in parentheses if available).
-
-2. Classify the comment with one or more tags from this list. Use multiple tags ONLY when the comment genuinely spans categories (e.g. a strength that also leads to a suggestion). Most comments need just one tag.
-${TAG_DESCRIPTIONS}
-
-3. Identify which section of the paper the highlighted passage is in. Use one of:
-${SECTION_DESCRIPTIONS}
-Use "other" if it doesn't fit. Infer from page context and content.
-
-Output ONLY valid JSON with exactly three fields:
-{"comment": "the cleaned annotation", "tags": ["tag1", "tag2"], "section": "section_name"}
+Output ONLY valid JSON with ${outputSpec}
 
 No other text. Just the JSON.`;
 }
 
+// Same conditional composition as cleanupSystemPrompt: without a passage the
+// intro, the annotation framing, the section paragraph, and the output spec
+// all drop their paper references together.
 function classifySystemPrompt(selectedText, comment, pageContext, references) {
-  return `You are a research annotation assistant. Your job is to classify a typed annotation about a passage in an academic paper, and identify which section of the paper the passage is in.
+  const hasPassage = !!selectedText;
 
-The user highlighted the following text from the paper:
----
-${selectedText}
----${pageContextBlock(pageContext)}${referencesBlock(references)}
+  const intro = hasPassage
+    ? 'classify a typed annotation about a passage in an academic paper, and identify which section of the paper the passage is in'
+    : 'classify a typed annotation a user made while reading an academic paper';
 
-They then wrote the following annotation:
+  const annotationIntro = hasPassage
+    ? 'They then wrote the following annotation:'
+    : 'The user wrote the following annotation:';
+
+  const sectionPara = hasPassage
+    ? `
+
+Also identify the paper section the highlighted passage is in:
+${SECTION_DESCRIPTIONS}
+Use "other" if unclear.`
+    : '';
+
+  const outputSpec = hasPassage
+    ? `exactly two fields:
+{"tags": ["tag1", "tag2"], "section": "section_name"}`
+    : `exactly one field:
+{"tags": ["tag1", "tag2"]}`;
+
+  return `You are a research annotation assistant. Your job is to ${intro}.${highlightBlock(selectedText)}${pageContextBlock(pageContext)}${referencesBlock(references)}
+
+${annotationIntro}
 ---
 ${comment}
 ---
 
 Classify the comment with one or more tags. Use multiple tags ONLY when the comment genuinely spans categories. Most comments need just one tag.
-${TAG_DESCRIPTIONS}
+${TAG_DESCRIPTIONS}${sectionPara}
 
-Also identify the paper section the highlighted passage is in:
-${SECTION_DESCRIPTIONS}
-Use "other" if unclear.
-
-Output ONLY valid JSON with exactly two fields:
-{"tags": ["tag1", "tag2"], "section": "section_name"}
+Output ONLY valid JSON with ${outputSpec}
 
 No other text. Just the JSON.`;
 }
@@ -190,7 +232,9 @@ async function cleanupTranscript(selectedText, rawTranscript, pageContext, refer
   return {
     comment: parsed.comment || content,
     tags: normalizeTags(parsed.tags),
-    section: normalizeSection(parsed.section),
+    // Without a passage the prompt never asks for a section — discard one the
+    // model volunteers anyway (it would be an ungrounded guess).
+    section: selectedText ? normalizeSection(parsed.section) : null,
   };
 }
 
@@ -203,7 +247,7 @@ async function classifyCommentType(selectedText, comment, pageContext, reference
   if (!parsed) return { tags: ['summary'], section: null };
   return {
     tags: normalizeTags(parsed.tags),
-    section: normalizeSection(parsed.section),
+    section: selectedText ? normalizeSection(parsed.section) : null,
   };
 }
 

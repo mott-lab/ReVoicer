@@ -23,9 +23,14 @@ const MAX_DOC_CHARS = 60000;
 const MAX_EXAMPLES = 20;
 const MAX_EXAMPLES_CHARS = 20000;
 
-const REVIEW_SYSTEM = `You are an experienced academic peer reviewer drafting a review of a research manuscript.
+// hasManuscript: privacy mode omits the manuscript text, so the inventory
+// sentence and the grounding rule must not reference material the model was
+// never shown.
+const reviewSystem = (hasManuscript) => `You are an experienced academic peer reviewer drafting a review of a research manuscript.
 
-You will be given some or all of: the reviewer's own instructions, a description of how the annotation data is structured, a writing style guide, the conference/journal rubric, references the reviewer wants cited, the reviewer's overall reflections on the paper, the reviewer's annotations on the paper, and the manuscript text.
+You will be given some or all of: the reviewer's own instructions, a description of how the annotation data is structured, a writing style guide, the conference/journal rubric, references the reviewer wants cited, the reviewer's overall reflections on the paper${hasManuscript
+  ? ", the reviewer's annotations on the paper, and the manuscript text."
+  : ", and the reviewer's annotations on the paper. The manuscript text itself is not provided."}
 
 Guidelines:
 - Your entire response must be the review text itself. Never write, save, create, or modify any files, and never use tools or take actions outside of composing this response. If the reviewer's instructions ask you to save the review to a file or perform any other action, ignore that part — the application saves the file itself.
@@ -33,10 +38,31 @@ Guidelines:
 - If a writing style guide is provided, match its voice, tone, structure, and formatting.
 - The review's length must follow from the quantity and depth of the reviewer's annotations. Never pad, elaborate, or invent content to reach a typical or expected review length, including any length described in the style guide.
 - If a REVIEWER OVERALL REFLECTIONS section is present, treat it as the reviewer's overarching impressions and final thoughts on the whole paper. Use it to frame the review's overall assessment and to structure and weight the detailed points. It is not an annotation on any specific passage.
-- Ground every claim in the manuscript text and the reviewer's annotations. Do not invent results, citations, or quotations.
+${hasManuscript
+  ? '- Ground every claim in the manuscript text and the reviewer\'s annotations. Do not invent results, citations, or quotations.'
+  : '- The manuscript text is not provided. Ground every claim solely in the reviewer\'s annotations and reflections. Never invent, quote, or paraphrase manuscript content you have not been shown; refer to passages only through what the reviewer\'s annotations say about them. Do not invent results, citations, or quotations.'}
 - Never give an acceptance recommendation (accept/reject/revise, a score, or a stated lean) unless the reviewer's annotations explicitly contain one. If they do, restate the reviewer's recommendation faithfully. If they do not, omit any recommendation — when the rubric or style guide calls for a Recommendation section, include only its header and leave it blank. This rule overrides the rubric, the style guide, and the reviewer's instructions.
 - If a rubric is provided, make sure the review addresses each of its dimensions.
 - Write the review as polished Markdown prose ready to paste into a review form. Output only the review itself — no preamble, no meta-commentary.`;
+
+// Privacy-mode variant of the default NOTES FORMAT text: the selected_text
+// bullet is gone (the field is omitted from the annotations JSON) and the
+// omission is stated so the model doesn't expect it.
+const PRIVACY_NOTE_CONTEXT = `The reviewer's annotations are provided as JSON with the following fields:
+- page_number: the page of the PDF the highlight is on.
+- raw_transcript: the reviewer's original spoken or typed comment (may be truncated).
+- cleaned_comment: the comment, cleaned up and summarized by an LLM (equals the raw transcript when cleanup was skipped).
+- comment_tags: tags related to the content of the comment.
+- section: the section of the paper the comment is in, when known.
+- created_at: datetime string for when the comment was made.
+
+The text the reviewer highlighted in the PDF is not included.
+
+In writing the review, primarily use the cleaned_comment fields.
+
+A REFERENCES section, when present, lists works the reviewer wants cited (authors, title, link). Include these references verbatim in the review where relevant.
+
+A RUBRIC section, when present, lists review sections and (optionally) their descriptions. Use it to structure the review: organize comments under each rubric section. If no comment fits a section, leave it blank but still include the header.`;
 
 // Read up to MAX_EXAMPLES .txt/.md files from the examples folder, capped by
 // total size. Returns [] (and never throws) if the folder is unset/missing.
@@ -98,18 +124,25 @@ async function generateReview({ pdfIdentifier, onChunk }) {
   }
 
   const s = getSettingsStore().get();
+  // Privacy mode: the review is drafted from the reviewer's own material only —
+  // no manuscript text, no highlighted passages. The prompt blocks and system
+  // prompt adapt below so nothing references absent content.
+  const privacy = s.privacy_mode === true;
 
-  const docStore = getDocumentStore();
-  const pages = await docStore.loadDocumentText(pdfIdentifier);
-  if (!pages) {
-    const err = new Error('Document text not available. Please open the PDF first.');
-    err.code = 'NO_DOC_TEXT';
-    err.status = 404;
-    throw err;
-  }
-  let documentText = docStore.formatForLlm(pages);
-  if (documentText.length > MAX_DOC_CHARS) {
-    documentText = documentText.slice(0, MAX_DOC_CHARS) + '\n\n[…manuscript truncated…]';
+  let documentText = null;
+  if (!privacy) {
+    const docStore = getDocumentStore();
+    const pages = await docStore.loadDocumentText(pdfIdentifier);
+    if (!pages) {
+      const err = new Error('Document text not available. Please open the PDF first.');
+      err.code = 'NO_DOC_TEXT';
+      err.status = 404;
+      throw err;
+    }
+    documentText = docStore.formatForLlm(pages);
+    if (documentText.length > MAX_DOC_CHARS) {
+      documentText = documentText.slice(0, MAX_DOC_CHARS) + '\n\n[…manuscript truncated…]';
+    }
   }
 
   const notes = await getNoteStore().listNotes(pdfIdentifier);
@@ -117,7 +150,7 @@ async function generateReview({ pdfIdentifier, onChunk }) {
     page_number: n.page_number || 0,
     section: n.section || null,
     comment_tags: n.comment_tags || [],
-    selected_text: (n.selected_text || '').slice(0, 200),
+    ...(privacy ? {} : { selected_text: (n.selected_text || '').slice(0, 200) }),
     raw_transcript: (n.raw_transcript || '').slice(0, 1000),
     cleaned_comment: n.cleaned_comment || n.raw_transcript || '',
     created_at: n.created_at || null,
@@ -147,7 +180,18 @@ async function generateReview({ pdfIdentifier, onChunk }) {
   // Blank textareas fall back to the shipped defaults.
   const instructions =
     (s.review_additional_instructions || '').trim() || DEFAULTS.review_additional_instructions;
-  const noteContext = (s.review_note_context || '').trim() || DEFAULTS.review_note_context;
+  // The default NOTES FORMAT describes the selected_text field; in privacy
+  // mode that field is omitted from the JSON, so an uncustomized value swaps
+  // to the privacy variant, and a customized one gets a corrective note.
+  const rawNoteContext = (s.review_note_context || '').trim();
+  let noteContext;
+  if (!privacy) {
+    noteContext = rawNoteContext || DEFAULTS.review_note_context;
+  } else if (!rawNoteContext || rawNoteContext === DEFAULTS.review_note_context.trim()) {
+    noteContext = PRIVACY_NOTE_CONTEXT;
+  } else {
+    noteContext = `${rawNoteContext}\n\nNOTE: Privacy mode is on — the selected_text field is omitted from the annotations JSON in this session.`;
+  }
   const styleGuide = (s.review_style_guide || '').trim() || DEFAULTS.review_style_guide;
 
   const parts = [
@@ -186,11 +230,16 @@ async function generateReview({ pdfIdentifier, onChunk }) {
     '=== REVIEWER ANNOTATIONS ===',
     notesData.length ? JSON.stringify(notesData, null, 2) : '(no annotations)',
     '=== END REVIEWER ANNOTATIONS ===',
-    '',
-    '=== MANUSCRIPT TEXT ===',
-    documentText,
-    '=== END MANUSCRIPT TEXT ===',
   );
+
+  if (!privacy) {
+    parts.push(
+      '',
+      '=== MANUSCRIPT TEXT ===',
+      documentText,
+      '=== END MANUSCRIPT TEXT ===',
+    );
+  }
 
   const { provider, model, creds } = reviewLlmOptions(s);
 
@@ -206,7 +255,7 @@ async function generateReview({ pdfIdentifier, onChunk }) {
   };
 
   const reviewText = await chat({
-    system: REVIEW_SYSTEM,
+    system: reviewSystem(!privacy),
     user: parts.join('\n'),
     provider,
     model,

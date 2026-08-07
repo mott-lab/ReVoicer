@@ -180,6 +180,7 @@ async function syncSettingsClasses() {
     if (!html) return;
     html.classList.toggle('speech-off', s.speech_provider === 'off');
     html.classList.toggle('offline-mode', s.offline_mode === true);
+    html.classList.toggle('privacy-mode', s.privacy_mode === true);
   } catch { /* settings unavailable on first run; fine */ }
 }
 window.addEventListener('DOMContentLoaded', syncSettingsClasses);

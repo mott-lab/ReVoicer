@@ -181,6 +181,16 @@
     </fieldset>
 
     <fieldset>
+      <legend>Privacy Mode</legend>
+
+      <label class="toggle">
+        <input type="checkbox" id="privacy_mode">
+        <span class="toggle-label">Never send paper content to the LLM (privacy mode)</span>
+      </label>
+      <div class="help">For venues that forbid sending submission content to an LLM. Prompts carry only your own words. Still works: annotation cleanup and tagging, reflections, review drafting from your notes, rubric tools, style guide, and the By Theme view (from your comments alone). Changes: Ask is disabled, new notes get no paper-section inference, and generated reviews cannot quote or verify against the manuscript. Speech still goes to your configured transcription provider (it is your own words), and citation lookup still queries Semantic Scholar — only its LLM parsing step is skipped.</div>
+    </fieldset>
+
+    <fieldset>
       <legend>Text Processing</legend>
 
       <label class="toggle">
@@ -624,6 +634,7 @@
         speech_provider: document.querySelector('input[name=speech_provider]:checked').value,
         cleanup_enabled: $('cleanup_enabled').checked,
         offline_mode: $('offline_mode').checked,
+        privacy_mode: $('privacy_mode').checked,
 
         openai_api_key: $('openai_api_key').value.trim(),
         openai_model: $('openai_model').value.trim() || 'gpt-4o-mini',
@@ -668,6 +679,7 @@
       const s = await window.desktop.getSettings();
       $('cleanup_enabled').checked = s.cleanup_enabled !== false;
       $('offline_mode').checked = s.offline_mode === true;
+      $('privacy_mode').checked = s.privacy_mode === true;
 
       document.querySelector(`input[name=text_provider][value="${s.text_provider}"]`)?.click();
       document.querySelector(`input[name=speech_provider][value="${s.speech_provider}"]`)?.click();

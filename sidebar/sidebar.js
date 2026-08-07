@@ -1171,7 +1171,11 @@ async function runPasteRubricParse(rubricText) {
 
 function renderQuestionsList(entries, container) {
   if (!entries || entries.length === 0) {
-    container.innerHTML = '<p class="empty-state">No questions yet. Highlight text and click Ask to get started.</p>';
+    // Privacy mode hides the Ask buttons (they send the whole paper to the
+    // LLM), so don't point the user at a control that isn't there.
+    container.innerHTML = document.documentElement.classList.contains('privacy-mode')
+      ? '<p class="empty-state">Ask is disabled while privacy mode is on (Settings) — it sends the paper text to the LLM.</p>'
+      : '<p class="empty-state">No questions yet. Highlight text and click Ask to get started.</p>';
     return;
   }
 

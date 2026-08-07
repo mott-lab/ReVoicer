@@ -201,7 +201,10 @@ async function lookupCitation({ pdfIdentifier, number }) {
 
   const settings = getSettingsStore().get();
   const apiKey = (settings.semantic_scholar_api_key || '').trim();
-  const llmEnabled = settings.cleanup_enabled !== false;
+  // The LLM parse sends a raw bibliography line from the PDF — paper content —
+  // so privacy mode skips it. The regex heuristics and the Semantic Scholar /
+  // OpenAlex lookups themselves are unaffected (they are not LLM calls).
+  const llmEnabled = settings.cleanup_enabled !== false && settings.privacy_mode !== true;
 
   // Parse identifiers up front. A title is only needed when a title-based
   // strategy will actually run: always when there's no identifier, and also as

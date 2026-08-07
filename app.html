@@ -145,6 +145,13 @@
     /* Same setting hides the reflection mic (inline row and nudge modal). */
     .speech-off .reflection-mic-btn { display: none !important; }
 
+    /* Privacy mode: Ask sends the whole paper to the LLM, so its entry
+       points disappear. The preflight in content.js submitQuestion() and the
+       server-side guard in qa-service.js are the real gates; this is UX. */
+    .privacy-mode #pcr-ask-btn { display: none !important; }
+    .privacy-mode #pcr-text-ask { display: none !important; }
+    .privacy-mode .pcr-hint-ask { display: none !important; }
+
     /* Header row: the tab bar plus the always-visible offline toggle in the
        right corner, a small space after the Review tab. The offline-mode
        class is synced onto <html> by preload.js from settings; clicking the

@@ -362,7 +362,7 @@ function showTextInputUI(selectedText) {
       <span>Clean up with LLM</span>
     </label>
     <div class="pcr-actions">
-      <span class="pcr-hint">Ctrl+Enter submit · Ctrl+Shift+Enter ask</span>
+      <span class="pcr-hint">Ctrl+Enter submit<span class="pcr-hint-ask"> · Ctrl+Shift+Enter ask</span></span>
       <button class="pcr-cancel-btn" id="pcr-text-cancel">Cancel</button>
       <button class="pcr-ask-btn" id="pcr-text-ask">Ask</button>
       <button class="pcr-stop-btn" id="pcr-text-submit">Submit</button>
@@ -449,8 +449,15 @@ async function submitQuestion(selectedText, question) {
   }
 
   // Q&A can't run at all without the LLM — check deterministically (offline
-  // mode off, provider credentials present) before making any request.
+  // mode off, provider credentials present) before making any request. Privacy
+  // mode blocks it outright: the prompt is the whole paper. (The Ask buttons
+  // are CSS-hidden too; this covers Ctrl+Shift+Enter and any stale UI.)
   const llm = await window.desktop.llmStatus();
+  if (llm.privacyMode) {
+    const d = describeApiError({ code: 'PRIVACY' }, 'Getting an answer');
+    showAnswerOverlay(question, d.text, false, true, d.openSettings);
+    return;
+  }
   if (!llm.ok) {
     const d = describeApiError({ code: llm.reason === 'offline' ? 'OFFLINE' : 'NOT_CONFIGURED' }, 'Getting an answer');
     showAnswerOverlay(question, d.text, false, true, d.openSettings);
