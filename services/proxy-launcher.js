@@ -26,6 +26,20 @@ async function isProxyUp() {
   }
 }
 
+// Claude CLI is optional. Check before starting bundled proxy: its standalone
+// entry exits when CLI is missing, and spawning that failed child can make
+// Electron startup noisy or fail on some platforms.
+function isClaudeAvailable() {
+  return new Promise((resolve) => {
+    const proc = spawn(process.env.CLAUDE_BIN || 'claude', ['--version'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    proc.once('error', () => resolve(false));
+    proc.once('close', (code) => resolve(code === 0));
+  });
+}
+
 // Fire-and-forget: never blocks app startup; failures are logged, and LLM
 // calls surface their own errors if the proxy truly isn't reachable.
 async function ensureProxy() {
@@ -36,6 +50,10 @@ async function ensureProxy() {
   }
   if (!fs.existsSync(PROXY_ENTRY)) {
     console.warn(`[proxy] not built (${PROXY_ENTRY} missing) — run "npm run proxy:build"`);
+    return;
+  }
+  if (!await isClaudeAvailable()) {
+    console.info('[proxy] Claude CLI not installed - bundled Claude proxy disabled');
     return;
   }
   // Electron's binary doubles as Node when ELECTRON_RUN_AS_NODE is set, so

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, net, shell, screen } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const apiStub = require('./api-stub');
@@ -106,6 +106,23 @@ function writeSettingsWindowState(state) {
   } catch { /* best effort */ }
 }
 
+// Keep restored Settings bounds within a currently connected display.
+function visibleSettingsBounds(bounds) {
+  const displays = screen.getAllDisplays();
+  const display = displays.find(({ workArea }) =>
+    bounds.x < workArea.x + workArea.width
+    && bounds.x + bounds.width > workArea.x
+    && bounds.y < workArea.y + workArea.height
+    && bounds.y + bounds.height > workArea.y
+  ) || screen.getPrimaryDisplay();
+  const area = display.workArea;
+  return {
+    ...bounds,
+    x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - bounds.width)),
+    y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - bounds.height)),
+  };
+}
+
 function openSettingsWindow(tab) {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
@@ -118,8 +135,12 @@ function openSettingsWindow(tab) {
   const saved = readSettingsWindowState();
   let bounds;
   if (saved && saved.width && saved.height) {
-    bounds = { width: saved.width, height: saved.height };
-    if (Number.isInteger(saved.x) && Number.isInteger(saved.y)) { bounds.x = saved.x; bounds.y = saved.y; }
+    bounds = {
+      width: saved.width,
+      height: saved.height,
+      x: Number.isInteger(saved.x) ? saved.x : 0,
+      y: Number.isInteger(saved.y) ? saved.y : 0,
+    };
   } else if (mainWindow && !mainWindow.isDestroyed()) {
     // Default to nearly the full main-window area, centered over it.
     const b = mainWindow.getBounds();
@@ -129,6 +150,8 @@ function openSettingsWindow(tab) {
   } else {
     bounds = { width: 1000, height: 760 };
   }
+
+  bounds = visibleSettingsBounds(bounds);
 
   settingsWindow = new BrowserWindow({
     ...bounds,
@@ -148,9 +171,13 @@ function openSettingsWindow(tab) {
       sandbox: false,
     },
   });
-  if (saved && saved.isMaximized) settingsWindow.maximize();
   settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadFile(SETTINGS_HTML, tab && typeof tab === 'string' ? { hash: tab } : undefined);
+  settingsWindow.loadFile(SETTINGS_HTML, tab && typeof tab === 'string' ? { hash: tab } : undefined)
+    .catch((err) => {
+      console.error('[settings] failed to load settings window:', err);
+    });
+  settingsWindow.show();
+  settingsWindow.focus();
 
   // Persist the size/position the user left it at (use the un-maximized rect so
   // a maximized window restores to a sensible size next time).
@@ -159,7 +186,6 @@ function openSettingsWindow(tab) {
     const b = settingsWindow.getNormalBounds();
     writeSettingsWindowState({
       x: b.x, y: b.y, width: b.width, height: b.height,
-      isMaximized: settingsWindow.isMaximized(),
     });
   });
   settingsWindow.on('closed', () => { settingsWindow = null; });
