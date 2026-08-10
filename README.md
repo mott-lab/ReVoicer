@@ -41,21 +41,21 @@ and get cleaned later.
 
 ## Getting the Most Out of It
 
-A few setup choices make a big difference:
+Some notes I have found can improve your experience:
 
-- **Small model for cleaning notes, large model for generating the
+- **Use a small model for cleaning notes, large model for generating the
   review.** Note cleanup and tagging is a frequent, lightweight task
   where a fast, cheap model works well (a mini/haiku-class model or a
   small local model). Review drafting benefits from a stronger model.
   The Review tab in Settings has its own provider and model, configured
-  independently from Text Processing, so both run side by side. See
+  independently from Text Processing. See
   [Settings](#settings-file--settings-ctrlcmd).
 - **Generate a personal style guide from your past reviews.** In
   Settings → Review, point the example reviews folder at `.txt`/`.md`
   files of reviews you have written and click **Generate style guide**.
   Drafted reviews then follow a guide distilled from your own writing
   instead of the generic default.
-- **Reviewing for a conference? Turn on Privacy Mode.** Some venues
+- **Reviewing for a conference? Turn on Privacy Mode in settings.** Some venues
   forbid sending submission content to an LLM.
   [Privacy Mode](#privacy-mode) guarantees no paper content ever
   appears in a prompt. Most features keep working from your own words
