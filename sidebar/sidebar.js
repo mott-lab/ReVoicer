@@ -68,6 +68,14 @@ async function init() {
     }
     if (msg.action === 'tabChanged') {
       const newId = msg.pdfIdentifier;
+      // The PDF changed or closed — abort any live reflection recording: it
+      // belongs to the previous PDF and its UI is about to be replaced or
+      // blanked. Clear the pending flag first so the abort's deferred flush
+      // doesn't race this branch's own reload/blank.
+      if (newId !== currentPdfId && reflectionRecCtl) {
+        reflectionsReloadPending = false;
+        reflectionRecCtl();
+      }
       if (newId && newId !== currentPdfId) {
         currentPdfId = newId;
         rubricCheck = null;
@@ -1895,6 +1903,14 @@ const REFLECTION_MIC_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill
 // onEnd/onError handlers belonging to the viewer's annotation flow.
 let reflectionCapture = null;
 
+// Non-null while a reflection recording is live: a function that aborts it
+// (cancel + exitRecording), reachable from outside wireReflectionMic's
+// closure. Lets loadReflections() detect a live recording and defer its
+// destructive re-render (mirroring noteEditorOpen/pendingNotesViewMode), and
+// lets the PDF-change path abort a recording whose UI is about to go away.
+let reflectionRecCtl = null;
+let reflectionsReloadPending = false;
+
 // Wire a mic button, mirroring the viewer's annotation recording pattern:
 // clicking the mic starts recording and replaces it with a stop button
 // (labeled "Add" by default — stops and submits) and a Cancel button
@@ -1937,6 +1953,7 @@ function wireReflectionMic(micBtn, onFinal, opts = {}) {
     micBtn.after(stopBtn, cancelBtn);
     setRowDisabled(true);
     recRelease = statusIndicator.begin('recording');
+    reflectionRecCtl = () => { reflectionCapture.cancel(); exitRecording(); };
   };
 
   const exitRecording = () => {
@@ -1945,9 +1962,15 @@ function wireReflectionMic(micBtn, onFinal, opts = {}) {
     if (cancelBtn) { cancelBtn.remove(); cancelBtn = null; }
     micBtn.style.display = '';
     setRowDisabled(false);
+    reflectionRecCtl = null;
+    if (reflectionsReloadPending) {
+      reflectionsReloadPending = false;
+      loadReflections();
+    }
   };
 
   micBtn.addEventListener('click', () => {
+    if (reflectionRecCtl) return; // a reflection recording is already live
     if (!reflectionCapture) reflectionCapture = new SpeechCapture();
     reflectionCapture.onEnd = async (transcript, audioBlob) => {
       exitRecording();
@@ -1994,6 +2017,12 @@ function wireReflectionMic(micBtn, onFinal, opts = {}) {
 }
 
 async function loadReflections() {
+  // A recording is live — a re-render would destroy its stop/cancel buttons
+  // and strand the capture. Defer; exitRecording() replays it.
+  if (reflectionRecCtl) {
+    reflectionsReloadPending = true;
+    return;
+  }
   const container = document.getElementById('reflections-container');
   if (!currentPdfId) {
     container.innerHTML = '';

@@ -74,7 +74,7 @@ async function loadPdf(url) {
     // Prefer the decoded original filename; the raw URL tail is a base64url blob.
     const titleName = (typeof getPdfBaseName === 'function' && getPdfBaseName()) ||
       decodeURIComponent(url.split('/').pop().split('?')[0]);
-    document.title = `PDF Converser - ${titleName}`;
+    document.title = `ReVoicer - ${titleName}`;
 
     // Reset render state for the new document.
     if (activeRenderTask) {

@@ -116,6 +116,7 @@ const routes = {
     let cleaned;
     let commentTags;
     let section;
+    let llmOriginal; // set only when the LLM rewrote the text
     if (skipRewrite) {
       cleaned = body.raw_transcript || '';
       if (cleanup_enabled) {
@@ -131,6 +132,7 @@ const routes = {
       cleaned = result.comment;
       commentTags = result.tags;
       section = result.section;
+      llmOriginal = result.comment;
     }
 
     return getNoteStore().createNote({
@@ -144,6 +146,7 @@ const routes = {
       commentTags,
       section,
       highlightData: body.highlight_data || null,
+      llmOriginal,
     });
   },
 
@@ -200,6 +203,7 @@ const routes = {
     );
     return store.updateNote(query.pdf_identifier, params.id, {
       cleaned_comment: comment,
+      llm_original: comment,
       comment_tags: tags,
       ...(privacy_mode ? {} : { section }),
       cleanup_status: 'done',
@@ -335,6 +339,7 @@ const routes = {
       rawTranscript: raw,
       cleanedText: text,
       cleanupStatus: 'done',
+      llmOriginal: text,
     });
   },
 
@@ -356,6 +361,7 @@ const routes = {
     const { text } = await cleanupReflection(reflection.raw_transcript || '');
     const updated = await store.updateReflection(query.pdf_identifier, params.id, {
       cleaned_text: text,
+      llm_original: text,
       cleanup_status: 'done',
     });
     if (!updated) return { __status: 404, error: 'Reflection not found' };

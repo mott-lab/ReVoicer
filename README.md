@@ -53,6 +53,21 @@ out on demand.
 Then `File → Open PDF…` (`Ctrl+O`) or drag a PDF onto the window.
 `File → Open Recent` lists recently opened files.
 
+### Standalone build (ReVoicer)
+
+```
+npm run dist
+```
+
+Produces `dist/ReVoicer Setup <version>.exe`, a one-click per-user Windows
+installer (Start Menu and desktop shortcut, uninstaller). The build also
+leaves `dist/win-unpacked/ReVoicer.exe`, which runs directly without
+installing. Installed users need no Node or npm. The Claude CLI requirement
+for the bundled proxy still applies. The proxy ships prebuilt, so run the
+proxy setup (or `npm run proxy:build`) before `npm run dist` if you want it
+included in working form. Notes and settings live in the same location as
+the dev app (`%APPDATA%/pdf-converser-desktop`), so both share data.
+
 ### LLM Setup (API Key)
 
 Every LLM-backed feature — annotation cleanup and tagging, Q&A, the

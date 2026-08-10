@@ -20,7 +20,7 @@ async function exportToMarkdown(pdfIdentifier) {
     '',
     `*Source: ${pdfIdentifier}*`,
     '',
-    '*Exported from PDF Converser*',
+    '*Exported from ReVoicer*',
     '',
     '---',
     '',

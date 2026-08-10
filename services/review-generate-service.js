@@ -273,6 +273,7 @@ async function generateReview({ pdfIdentifier, onChunk }) {
     // Keep any previously chosen save path; the caller writes the file after
     // picking a location.
     review_file_path: existing ? existing.review_file_path : '',
+    llm_original: reviewText,
   });
 }
 
@@ -315,6 +316,7 @@ async function saveReview({ pdfIdentifier, reviewText, filePath }) {
     note_count: existing ? existing.note_count : 0,
     generated_at: existing ? existing.generated_at : undefined,
     review_file_path: effectivePath,
+    llm_original: existing ? existing.llm_original : undefined,
   });
   saved.file_missing = false;
   return saved;

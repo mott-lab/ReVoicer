@@ -73,11 +73,13 @@ class ReflectionStore {
       (a.created_at || '').localeCompare(b.created_at || ''));
   }
 
-  async createReflection({ contentHash, rawTranscript, cleanedText, cleanupStatus }) {
+  async createReflection({ contentHash, rawTranscript, cleanedText, cleanupStatus, llmOriginal }) {
     const reflection = {
       id: randomUUID(),
       raw_transcript: rawTranscript || '',
       cleaned_text: cleanedText || rawTranscript || '',
+      // LLM output as generated, before user edits. Absent = not captured.
+      ...(typeof llmOriginal === 'string' ? { llm_original: llmOriginal } : {}),
       cleanup_status: cleanupStatus || 'done',
       created_at: new Date().toISOString(),
     };

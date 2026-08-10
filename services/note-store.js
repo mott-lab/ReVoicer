@@ -33,6 +33,11 @@
 //   text + classify) or 'classify' (tags/section only, text stays verbatim;
 //   typed offline with "Clean up with LLM" unchecked). Older files without
 //   the field get 'full' injected on read.
+// - `llm_original`: the LLM's cleaned text exactly as generated, before any
+//   user edits — kept so LLM output can later be compared against the final
+//   `cleaned_comment`. Overwritten on re-clean (new baseline). Absent when
+//   no LLM wrote the text (degraded paths, old files); absence means "not
+//   captured", so it is not backfilled on read.
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -121,7 +126,7 @@ class NoteStore {
   async createNote({
     contentHash, pdfTitle, pdfUrl, selectedText, pageNumber,
     rawTranscript, cleanedComment, commentTags, section, highlightData,
-    cleanupStatus, cleanupMode,
+    cleanupStatus, cleanupMode, llmOriginal,
   }) {
     const tags = Array.isArray(commentTags) && commentTags.length > 0
       ? commentTags
@@ -139,6 +144,7 @@ class NoteStore {
       highlight_data: highlightData || null,
       cleanup_status: cleanupStatus === 'pending' ? 'pending' : 'done',
       cleanup_mode: cleanupMode === 'classify' ? 'classify' : 'full',
+      ...(typeof llmOriginal === 'string' ? { llm_original: llmOriginal } : {}),
       created_at: new Date().toISOString(),
     };
 

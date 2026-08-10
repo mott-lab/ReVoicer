@@ -68,7 +68,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'PDF Converser',
+    title: 'ReVoicer',
     icon: APP_ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -448,6 +448,20 @@ ipcMain.handle('desktop:openExternal', (_e, url) => {
   shell.openExternal(url);
   return true;
 });
+
+// Single instance: a second launch (e.g. double-clicking the shortcut again)
+// would collide with the proxy's fixed port, so focus the existing window
+// instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 
 app.whenReady().then(() => {
   const userData = app.getPath('userData');

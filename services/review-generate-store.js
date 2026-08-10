@@ -61,7 +61,7 @@ class ReviewGenerateStore {
     }
   }
 
-  async save(contentHash, { review_text, thinking_text, note_count, generated_at, review_file_path }) {
+  async save(contentHash, { review_text, thinking_text, note_count, generated_at, review_file_path, llm_original }) {
     const record = {
       content_hash: contentHash,
       review_text: review_text || '',
@@ -73,6 +73,10 @@ class ReviewGenerateStore {
       generated_at: generated_at || new Date().toISOString(),
       // Absolute path of the user-chosen .md file (the canonical copy). '' until set.
       review_file_path: review_file_path || '',
+      // The review exactly as the LLM generated it, before user edits —
+      // kept so it can later be compared against the final saved review.
+      // Overwritten on regeneration. Absent = not captured (older records).
+      ...(typeof llm_original === 'string' ? { llm_original } : {}),
     };
     return this._withLock(contentHash, async () => {
       await this._writeFile(contentHash, record);

@@ -8,7 +8,46 @@
     "start": "electron .",
     "proxy:build": "node scripts/setup-proxy.js --force",
     "fetch-vosk-model": "node scripts/download-vosk-model.js",
-    "postinstall": "node scripts/download-vosk-model.js"
+    "postinstall": "node scripts/download-vosk-model.js",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.mattgottsacker.revoicer",
+    "productName": "ReVoicer",
+    "asar": false,
+    "npmRebuild": false,
+    "files": [
+      "**/*",
+      "!vendor/**",
+      "!models/**",
+      "!paper/**",
+      "!reviews/**",
+      "!review-examples/**",
+      "!docs/**",
+      "!*.local.md",
+      "!*.code-workspace",
+      "!README.md"
+    ],
+    "extraResources": [
+      { "from": "models", "to": "app/models" },
+      {
+        "from": "vendor/claude-max-api-proxy",
+        "to": "app/vendor/claude-max-api-proxy",
+        "filter": ["dist/**/*", "package.json"]
+      },
+      {
+        "from": "vendor/claude-max-api-proxy/node_modules",
+        "to": "app/vendor/claude-max-api-proxy/node_modules"
+      }
+    ],
+    "win": {
+      "icon": "icon/noun-transcript-2989894-FFB258.png",
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": true
+    }
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
@@ -16,6 +55,7 @@
     "vosk-browser": "^0.0.8"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
   }
 }
