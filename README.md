@@ -1,17 +1,65 @@
 # PDF Converser
 
-Electron desktop app for reading and reviewing PDFs with voice/text
-annotations, LLM-assisted Q&A across the whole document, and a
-review-writing workflow (rubrics, coverage checks, and generated review
-drafts). Highlight a passage, speak or type your thought, and an LLM
-cleans it up and classifies it (summary, critique, strength, question,
-related work, suggestion, follow-up). All notes for a PDF travel with the
-document via a content-hash filename, so moving or renaming the file
-never loses its annotations.
+Electron desktop app that supports peer reviewers by letting them
+converse with a paper as they read it. Highlight a passage and speak
+(or type) a train-of-thought comment. An LLM cleans the comment using
+the surrounding prose as context, tags it by comment type (summary,
+critique, strength, question, related work, suggestion, follow-up), and
+anchors it to the passage. After you finish reading, the app checks the
+accumulated notes against a venue-specific rubric and reports coverage
+gaps, then drafts a review composed from your comments, written to a
+style guide distilled from your past reviews. Published as **ReVoicer**
+(see [Citation](#citation)).
 
-Runs fully offline once configured with a local model provider, and has a
-dedicated offline mode for working with no LLM at all — notes queue up
+All notes for a PDF travel with the document via a content-hash
+filename, so moving or renaming the file never loses its annotations.
+Runs fully offline once configured with a local model provider, and has
+a dedicated offline mode for working with no LLM at all. Notes queue up
 and get cleaned later.
+
+> **Scope and caution.** This tool is not meant to do the reviewing for
+> you. It helps with the review process and removes friction around
+> capturing and organizing your own thinking. Several safeguards are
+> designed in (grounded Q&A, reviews composed from your own comments, a
+> privacy mode), but LLM output can still hallucinate. Check anything it
+> generates before it goes into a real review.
+
+## Contents
+
+- [Getting the Most Out of It](#getting-the-most-out-of-it)
+- [Requirements](#requirements)
+- [Run](#run)
+- [How It Works](#how-it-works)
+- [Offline Mode](#offline-mode)
+- [Privacy Mode](#privacy-mode)
+- [Settings](#settings-file--settings-ctrlcmd)
+- [Note Storage](#note-storage)
+- [Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy)
+- [Layout](#layout)
+- [Future Ideas](#future-ideas)
+- [Citation](#citation)
+
+## Getting the Most Out of It
+
+A few setup choices make a big difference:
+
+- **Small model for cleaning notes, large model for generating the
+  review.** Note cleanup and tagging is a frequent, lightweight task
+  where a fast, cheap model works well (a mini/haiku-class model or a
+  small local model). Review drafting benefits from a stronger model.
+  The Review tab in Settings has its own provider and model, configured
+  independently from Text Processing, so both run side by side. See
+  [Settings](#settings-file--settings-ctrlcmd).
+- **Generate a personal style guide from your past reviews.** In
+  Settings → Review, point the example reviews folder at `.txt`/`.md`
+  files of reviews you have written and click **Generate style guide**.
+  Drafted reviews then follow a guide distilled from your own writing
+  instead of the generic default.
+- **Reviewing for a conference? Turn on Privacy Mode.** Some venues
+  forbid sending submission content to an LLM.
+  [Privacy Mode](#privacy-mode) guarantees no paper content ever
+  appears in a prompt. Most features keep working from your own words
+  alone.
 
 ## Requirements
 
@@ -85,48 +133,15 @@ generation — needs a configured model provider. Open
   Together, LM Studio, vLLM, llama.cpp server, etc. (key optional,
   depending on the endpoint)
 
-### Claude subscription via bundled proxy
+A Claude Pro/Max subscription can also power everything without an API
+key, through an opt-in bundled proxy wrapping the Claude Code CLI. See
+[Claude subscription via bundled proxy](#claude-subscription-via-bundled-proxy)
+near the end of this README.
 
-A Claude Pro/Max subscription can power all LLM features without an API
-key, through the vendored
-[claude-max-api-proxy](vendor/claude-max-api-proxy) submodule (an
-OpenAI-compatible server wrapping the Claude Code CLI). It is strictly
-opt-in: nothing related to it runs unless you enable it, so the app works
-normally for users without the Claude CLI.
-
-Requirements: the [Claude Code CLI](https://claude.com/claude-code)
-installed and logged in (`claude` on your PATH). Then in Settings pick
-**OpenAI-compatible**, tick **Use bundled Claude Code CLI proxy**, and
-click **Set up and test**. That one flow checks the CLI, builds the proxy
-on first use (checking out the submodule if needed), starts the server,
-proves the whole chain with a real one-line request, and saves the
-settings — the base URL is filled and locked automatically
-(`http://127.0.0.1:3456/v1`) and the model defaults to
-`claude-sonnet-4-5` (any id containing `opus`/`sonnet`/`haiku` routes to
-that tier; the model list shown is fixed by the proxy, not read from your
-account). Each failure mode reports a specific remedy (CLI missing, not
-logged in, port taken, build failed, proxy out of date).
-
-Once set up, the app starts the proxy at launch and stops it on quit. A
-proxy you started manually in a terminal is detected and left alone, and
-if the proxy crashes mid-session the next LLM call restarts it
-transparently. Untick the checkbox (and Save) to turn all of this off.
-
-**Updating the proxy.** The submodule tracks a fork
-(`mott-lab/claude-max-api-proxy`) of the upstream project
-(`wende/claude-max-api-proxy`). When the fork gains new commits, pull
-them into the app with:
-
-```
-git submodule update --remote vendor/claude-max-api-proxy
-npm run proxy:build
-git add vendor/claude-max-api-proxy && git commit
-```
-
-For other providers, use the **Test connection** button to confirm the
-credentials work; it also lists the available models. Keys are stored
-locally in `settings.json` under your OS user-data directory (see Note
-Storage below) and are only ever sent to the provider you configured.
+Use the **Test connection** button to confirm the credentials work; it
+also lists the available models. Keys are stored locally in
+`settings.json` under your OS user-data directory (see Note Storage
+below) and are only ever sent to the provider you configured.
 
 Without a provider configured, the app still works as a PDF
 reader/annotator: notes are saved with their raw text and marked
@@ -432,6 +447,44 @@ scheme means:
 - **O(1) lookup** — the hash maps directly to the filename; no index
   needed.
 
+## Claude subscription via bundled proxy
+
+A Claude Pro/Max subscription can power all LLM features without an API
+key, through the vendored
+[claude-max-api-proxy](vendor/claude-max-api-proxy) submodule (an
+OpenAI-compatible server wrapping the Claude Code CLI). It is strictly
+opt-in: nothing related to it runs unless you enable it, so the app works
+normally for users without the Claude CLI.
+
+Requirements: the [Claude Code CLI](https://claude.com/claude-code)
+installed and logged in (`claude` on your PATH). Then in Settings pick
+**OpenAI-compatible**, tick **Use bundled Claude Code CLI proxy**, and
+click **Set up and test**. That one flow checks the CLI, builds the proxy
+on first use (checking out the submodule if needed), starts the server,
+proves the whole chain with a real one-line request, and saves the
+settings — the base URL is filled and locked automatically
+(`http://127.0.0.1:3456/v1`) and the model defaults to
+`claude-sonnet-4-5` (any id containing `opus`/`sonnet`/`haiku` routes to
+that tier; the model list shown is fixed by the proxy, not read from your
+account). Each failure mode reports a specific remedy (CLI missing, not
+logged in, port taken, build failed, proxy out of date).
+
+Once set up, the app starts the proxy at launch and stops it on quit. A
+proxy you started manually in a terminal is detected and left alone, and
+if the proxy crashes mid-session the next LLM call restarts it
+transparently. Untick the checkbox (and Save) to turn all of this off.
+
+**Updating the proxy.** The submodule tracks a fork
+(`mott-lab/claude-max-api-proxy`) of the upstream project
+(`wende/claude-max-api-proxy`). When the fork gains new commits, pull
+them into the app with:
+
+```
+git submodule update --remote vendor/claude-max-api-proxy
+npm run proxy:build
+git add vendor/claude-max-api-proxy && git commit
+```
+
 ## Layout
 
 - `main.js` — Electron main process. Creates the window, builds the menu,
@@ -553,3 +606,24 @@ notes-oriented template could improve the structure.
 - check each critique made in the review. if it makes some claim, is that claim appropriately supported? e.g., if it says, "there is related work on XYZ", does the review provide citations to support this? or if it says, "there is not enough engagement with the literature in this discussion section", how many references are included in that section of the text?
   (The current **Check Review** feature judges rubric *coverage*; this
   would verify the *claims* inside a drafted review.)
+
+## Citation
+
+The system is described in the ReVoicer paper, presented at the
+Alt'ISMAR workshop at IEEE ISMAR 2026:
+[arxiv.org/abs/2608.00299](https://arxiv.org/abs/2608.00299). To cite
+it:
+
+```bibtex
+@misc{gottsacker2026revoicer,
+  title         = {ReVoicer: Conversational Voice Annotation for
+                   Human-Centered, LLM-Assisted Peer Review},
+  author        = {Gottsacker, Matt and Alwin, Ahinya and Furuya,
+                   Hiroshi and Lindeman, Robert W. and Bruder, Gerd and
+                   Welch, Gregory F.},
+  year          = {2026},
+  eprint        = {2608.00299},
+  archivePrefix = {arXiv},
+  url           = {https://arxiv.org/abs/2608.00299},
+}
+```
