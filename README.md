@@ -84,7 +84,7 @@ needed.
 
 ```
 git clone --recurse-submodules <repo-url>
-cd pdf-converser
+cd ReVoicer
 npm install
 npm start
 ```
