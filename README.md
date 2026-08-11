@@ -1,4 +1,4 @@
-# PDF Converser
+# ReVoicer
 
 Electron desktop app that supports peer reviewers by letting them
 converse with a paper as they read it. Highlight a passage and speak
